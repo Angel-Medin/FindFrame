@@ -189,6 +189,7 @@ class TagManagerSQLite:
         
         # Filtro de etiquetas negativas
         if negative_tags and results:
+        #if negative_tags:
             placeholders = ",".join("?" * len(negative_tags))
             query = f"""
                 SELECT DISTINCT img.path

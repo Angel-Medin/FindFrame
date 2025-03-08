@@ -170,11 +170,20 @@ class ImageViewer(QMainWindow):
             self.tag_list.addItem(tag)
 
     def add_tag(self):
-        new_tag = self.new_tag_input.text().strip()
-        if not new_tag:
+        new_tags = self.new_tag_input.text().strip()
+        if not new_tags:
             return
+        
         current_image = self.image_paths[self.index]
-        self.tag_manager.add_tag(str(current_image), new_tag)
+        
+        # Dividir las etiquetas por comas y limpiar espacios
+        tags = [tag.strip() for tag in new_tags.split(',')]
+        
+        # Agregar cada etiqueta individualmente
+        for tag in tags:
+            if tag:  # Ignorar cadenas vacías
+                self.tag_manager.add_tag(str(current_image), tag)
+    
         self.new_tag_input.clear()
         self.update_tag_list()
 
