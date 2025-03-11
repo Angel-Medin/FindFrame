@@ -2,7 +2,7 @@ from pathlib import Path
 from PyQt5.QtWidgets import (
     QMainWindow, QPushButton, QLabel, QFileDialog,
     QVBoxLayout, QWidget, QHBoxLayout, QScrollArea,
-    QFrame, QListWidget, QLineEdit, QSizePolicy
+    QFrame, QListWidget, QLineEdit, QSizePolicy, QGridLayout
 )
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt
@@ -51,12 +51,14 @@ class ImageViewer(QMainWindow):
         self.thumbnails_layout = QVBoxLayout()
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setFixedWidth(120)  # Ancho fijo para miniaturas
+        self.scroll_area.setFixedWidth(320)  # Aumentar ancho para 3 columnas
         self.scroll_widget = QWidget()
-        self.scroll_layout = QVBoxLayout(self.scroll_widget)  # Layout vertical
+        self.scroll_layout = QGridLayout(self.scroll_widget)  # Cambiar a QGridLayout
+        self.scroll_layout.setContentsMargins(0, 0, 0, 0)
+        self.scroll_layout.setSpacing(2)  # Pequeño espacio entre miniaturas
         self.scroll_area.setWidget(self.scroll_widget)
         self.thumbnails_layout.addWidget(self.scroll_area)
-        self.content_layout.addLayout(self.thumbnails_layout, 1)  # Proporción 1
+        self.content_layout.addLayout(self.thumbnails_layout, 1)
 
         # Sección central: Imagen y navegación
         self.center_layout = QVBoxLayout()
@@ -168,8 +170,15 @@ class ImageViewer(QMainWindow):
             thumb_label.setAlignment(Qt.AlignCenter)
             thumb_label.setFrameShape(QFrame.Box)
             thumb_label.mousePressEvent = lambda event, i=idx: self.thumbnail_clicked(i)
-            self.scroll_layout.addWidget(thumb_label)
+            
+            # Calcular posición en la grilla (3 columnas)
+            row = idx // 3
+            col = idx % 3
+            self.scroll_layout.addWidget(thumb_label, row, col, Qt.AlignCenter)
             self.thumbnail_labels.append(thumb_label)
+
+        # Asegurar que el layout se expanda correctamente
+        self.scroll_widget.adjustSize()
 
     
     def highlight_thumbnail(self):
