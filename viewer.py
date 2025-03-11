@@ -135,6 +135,8 @@ class ImageViewer(QMainWindow):
         self.btn_prev.setEnabled(self.index > 0)
         self.btn_next.setEnabled(self.index < len(self.image_paths) - 1)
 
+        self.highlight_thumbnail()
+
     def show_next(self):
         if self.index < len(self.image_paths) - 1:
             self.index += 1
@@ -163,6 +165,14 @@ class ImageViewer(QMainWindow):
             thumb_label.mousePressEvent = lambda event, i=idx: self.thumbnail_clicked(i)
             self.scroll_layout.addWidget(thumb_label)
             self.thumbnail_labels.append(thumb_label)
+    
+    def highlight_thumbnail(self):
+        """Resalta la miniatura de la imagen actual"""
+        for i, thumb_label in enumerate(self.thumbnail_labels):
+            if i == self.index:
+                thumb_label.setStyleSheet("border: 5px solid red;")
+            else:
+                thumb_label.setStyleSheet("")
 
     def thumbnail_clicked(self, index):
         self.index = index
