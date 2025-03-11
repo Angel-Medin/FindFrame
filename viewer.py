@@ -2,7 +2,7 @@ from pathlib import Path
 from PyQt5.QtWidgets import (
     QMainWindow, QPushButton, QLabel, QFileDialog,
     QVBoxLayout, QWidget, QHBoxLayout, QScrollArea,
-    QFrame, QListWidget, QLineEdit, QSizePolicy, QGridLayout
+    QFrame, QListWidget, QLineEdit, QSizePolicy
 )
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt
@@ -20,58 +20,59 @@ class ImageViewer(QMainWindow):
         self.tag_manager = TagManagerSQLite()
         self.setup_ui()
 
-
     def setup_ui(self):
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         self.main_layout = QVBoxLayout(self.central_widget)
 
-        # Botón para cargar carpeta (igual)
+        # Botón para cargar carpeta
         self.btn_load = QPushButton("📂 Cargar Carpeta")
         self.btn_load.clicked.connect(self.load_folder)
         self.main_layout.addWidget(self.btn_load)
 
-        # Filtros (igual)
+        # Filtros
         self.filter_layout = QHBoxLayout()
-        # ... (todo el código de filtros igual que antes)
+        self.positive_tags_input = QLineEdit()
+        self.positive_tags_input.setPlaceholderText("Etiquetas positivas (separadas por comas)")
+        self.filter_layout.addWidget(self.positive_tags_input)
+        self.negative_tags_input = QLineEdit()
+        self.negative_tags_input.setPlaceholderText("Etiquetas negativas (separadas por comas)")
+        self.filter_layout.addWidget(self.negative_tags_input)
+        self.btn_apply_filters = QPushButton("Aplicar Filtros")
+        self.btn_apply_filters.clicked.connect(self.apply_filters)
+        self.filter_layout.addWidget(self.btn_apply_filters)
         self.main_layout.addLayout(self.filter_layout)
 
-        # Layout principal dividido en 3 secciones
+        # Layout principal: miniaturas | contenido | etiquetas
         self.content_layout = QHBoxLayout()
         self.main_layout.addLayout(self.content_layout)
 
-        # =============================================
-        # SECCIÓN IZQUIERDA: MINIATURAS EN GRID (CAMBIO PRINCIPAL)
-        # =============================================
-        self.thumbnail_scroll = QScrollArea()
-        self.thumbnail_scroll.setWidgetResizable(True)
-        self.thumbnail_scroll.setFixedWidth(320)  # Ancho para 3 columnas
+        # Sección izquierda: Miniaturas verticales
+        self.thumbnails_layout = QVBoxLayout()
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFixedWidth(120)  # Ancho fijo para miniaturas
         self.scroll_widget = QWidget()
-        self.scroll_layout = QGridLayout(self.scroll_widget)  # GridLayout en vez de VBox
-        self.scroll_widget.setLayout(self.scroll_layout)
-        self.thumbnail_scroll.setWidget(self.scroll_widget)
-        self.content_layout.addWidget(self.thumbnail_scroll)
+        self.scroll_layout = QVBoxLayout(self.scroll_widget)  # Layout vertical
+        self.scroll_area.setWidget(self.scroll_widget)
+        self.thumbnails_layout.addWidget(self.scroll_area)
+        self.content_layout.addLayout(self.thumbnails_layout, 1)  # Proporción 1
 
-        # =============================================
-        # SECCIÓN CENTRAL: IMAGEN Y CONTROLES
-        # =============================================
+        # Sección central: Imagen y navegación
         self.center_layout = QVBoxLayout()
-        self.content_layout.addLayout(self.center_layout, 4)  # Mayor prioridad de espacio
+        self.content_layout.addLayout(self.center_layout, 4)  # Proporción 4
 
-        # Imagen principal
         self.image_label = QLabel("No hay imagen cargada", alignment=Qt.AlignCenter)
         self.image_label.setStyleSheet("border: 1px solid black;")
         self.image_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
-        self.image_label.setMinimumSize(100, 100)
+        self.image_label.setMinimumSize(100,100)
         self.center_layout.addWidget(self.image_label)
 
-        # Nombre del archivo
         self.filename_label = QLabel("", alignment=Qt.AlignCenter)
         self.filename_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.filename_label.setMaximumHeight(40)
         self.center_layout.addWidget(self.filename_label)
 
-        # Botones de navegación (igual)
         self.nav_layout = QHBoxLayout()
         self.btn_prev = QPushButton("◀ Anterior")
         self.btn_prev.clicked.connect(self.show_previous)
@@ -83,11 +84,9 @@ class ImageViewer(QMainWindow):
         self.nav_layout.addWidget(self.btn_next)
         self.center_layout.addLayout(self.nav_layout)
 
-        # =============================================
-        # SECCIÓN DERECHA: ETIQUETAS (IGUAL QUE ANTES)
-        # =============================================
+        # Sección derecha: etiquetas
         self.right_layout = QVBoxLayout()
-        self.content_layout.addLayout(self.right_layout, 1)
+        self.content_layout.addLayout(self.right_layout, 1)  # Proporción 1
         self.tag_title = QLabel("Etiquetas de la imagen", alignment=Qt.AlignCenter)
         self.right_layout.addWidget(self.tag_title)
         self.tag_list = QListWidget()
@@ -101,6 +100,8 @@ class ImageViewer(QMainWindow):
         self.btn_remove_tag = QPushButton("Eliminar Etiqueta")
         self.btn_remove_tag.clicked.connect(self.remove_tag)
         self.right_layout.addWidget(self.btn_remove_tag)
+
+
 
     def load_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta")
@@ -152,18 +153,12 @@ class ImageViewer(QMainWindow):
             self.show_image()
 
     def load_thumbnails(self):
-        # Limpiar miniaturas anteriores
         while self.scroll_layout.count():
             child = self.scroll_layout.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
         self.thumbnail_labels = []
-
-        # Cargar miniaturas en grid de 3 columnas
         for idx, path in enumerate(self.image_paths):
-            row = idx // 3  # Calculamos fila
-            col = idx % 3   # Calculamos columna
-
             thumb_label = QLabel()
             thumb_label.setFixedSize(100, 100)
             pix = QPixmap(str(path))
@@ -173,15 +168,10 @@ class ImageViewer(QMainWindow):
             thumb_label.setAlignment(Qt.AlignCenter)
             thumb_label.setFrameShape(QFrame.Box)
             thumb_label.mousePressEvent = lambda event, i=idx: self.thumbnail_clicked(i)
-            
-            self.scroll_layout.addWidget(thumb_label, row, col, alignment=Qt.AlignCenter)
+            self.scroll_layout.addWidget(thumb_label)
             self.thumbnail_labels.append(thumb_label)
 
-        # Añadir espaciado entre filas
-        self.scroll_layout.setVerticalSpacing(10)
-        self.scroll_layout.setHorizontalSpacing(5)
-
-
+    
     def highlight_thumbnail(self):
         """Resalta la miniatura de la imagen actual"""
         for i, thumb_label in enumerate(self.thumbnail_labels):
