@@ -118,13 +118,18 @@ class ImageViewer(QMainWindow):
     def show_image(self):
         if not self.image_paths:
             return
-        pixmap = QPixmap(str(self.image_paths[self.index]))
-        if pixmap.isNull():
+        try:
+            pixmap = QPixmap(str(self.image_paths[self.index]))
+            if pixmap.isNull():
+                raise ValueError("No se pudo cargar la imagen.")
+        except Exception as e:
+            print("Error al cargar la imagen:", e)
             self.image_label.setText("No se pudo cargar la imagen.")
-        else:
-            self.image_label.setPixmap(
-                pixmap.scaled(self.image_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            )
+            return
+
+        self.image_label.setPixmap(
+            pixmap.scaled(self.image_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        )
         self.filename_label.setText(f"{self.image_paths[self.index].name} ({self.index+1}/{len(self.image_paths)})")
         self.update_tag_list()
         self.btn_prev.setEnabled(self.index > 0)

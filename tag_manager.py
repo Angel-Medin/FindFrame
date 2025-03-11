@@ -76,7 +76,8 @@ class TagManagerSQLite:
         """
         cursor = self.conn.cursor()
         cursor.execute("SELECT id FROM img WHERE path = ?", (str(image_path),))
-        return cursor.fetchone()[0] if cursor.rowcount else None
+        result = cursor.fetchone()
+        return result[0] if result is not None else None
 
     def get_tag_id(self, tag):
         """
@@ -88,7 +89,8 @@ class TagManagerSQLite:
         """
         cursor = self.conn.cursor()
         cursor.execute("SELECT id FROM tag WHERE name = ?", (tag,))
-        return cursor.fetchone()[0] if cursor.rowcount else None
+        result = cursor.fetchone()
+        return result[0] if result is not None else None
 
     def get_tags(self, image_path):
         """
@@ -105,6 +107,7 @@ class TagManagerSQLite:
             JOIN img_tag it ON t.id = it.tag_id
             JOIN img i ON i.id = it.img_id
             WHERE i.path = ?
+            ORDER BY t.name ASC
         """
         cursor.execute(query, (str(image_path),))
         return [row[0] for row in cursor.fetchall()]
@@ -168,6 +171,9 @@ class TagManagerSQLite:
         cursor = self.conn.cursor()
         results = []
         
+        print(f"Positive tags: {positive_tags}")
+        print(f"Negative tags: {negative_tags}")
+        
         # Filtro de etiquetas positivas
         if positive_tags:
             placeholders = ",".join("?" * len(positive_tags))
@@ -178,18 +184,18 @@ class TagManagerSQLite:
                 JOIN tag ON tag.id = img_tag.tag_id
                 WHERE tag.name IN ({placeholders})
                 GROUP BY img.id
-                HAVING COUNT(DISTINCT tag.name) = ?  -- Asegura todas las etiquetas positivas
+                HAVING COUNT(DISTINCT tag.name) = ?
             """
             cursor.execute(query, (*positive_tags, len(positive_tags)))
             results = [row[0] for row in cursor.fetchall()]
+            print(f"Images after positive filter: {len(results)}")
         else:
-            # Si no hay positivas, considerar todas las imágenes
             cursor.execute("SELECT path FROM img")
             results = [row[0] for row in cursor.fetchall()]
+            print(f"All images: {len(results)}")
         
         # Filtro de etiquetas negativas
-        if negative_tags and results:
-        #if negative_tags:
+        if negative_tags:  # Eliminamos la condición "and results"
             placeholders = ",".join("?" * len(negative_tags))
             query = f"""
                 SELECT DISTINCT img.path
@@ -198,9 +204,13 @@ class TagManagerSQLite:
                 JOIN tag ON tag.id = img_tag.tag_id
                 WHERE tag.name IN ({placeholders})
             """
+            print(f"Negative query: {query}")
+            print(f"Negative params: {negative_tags}")
             cursor.execute(query, negative_tags)
             excluded = {row[0] for row in cursor.fetchall()}
+            print(f"Images to exclude: {len(excluded)}")
             results = [p for p in results if p not in excluded]
+            print(f"Images after negative filter: {len(results)}")
         
         return results
 
