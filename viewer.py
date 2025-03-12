@@ -103,6 +103,10 @@ class ImageViewer(QMainWindow):
         self.btn_remove_tag.clicked.connect(self.remove_tag)
         self.right_layout.addWidget(self.btn_remove_tag)
 
+        self.btn_open_external = QPushButton("Abrir Ubicación")
+        self.btn_open_external.clicked.connect(self.external_app)
+        self.right_layout.addWidget(self.btn_open_external)
+
 
 
     def load_folder(self):
@@ -245,6 +249,28 @@ class ImageViewer(QMainWindow):
         if self.image_paths:
             self.show_image()
         super().resizeEvent(event)
+
+
+    def external_app(self):
+        import os
+        import subprocess
+
+        if not self.image_paths:
+            return
+
+        current_image = str(self.image_paths[self.index])
+        
+        try:
+            # Opción 1: Abrir la carpeta contenedora y seleccionar la imagen en Windows Explorer.
+            subprocess.Popen(["explorer", "/select,", current_image])
+        except Exception as e:
+            print("Error al abrir la carpeta. Abriendo la imagen en el visor por defecto:", e)
+            try:
+                # Opción 2: Abrir la imagen con la aplicación predeterminada de Windows.
+                os.startfile(current_image)
+            except Exception as e2:
+                print("Error al abrir la imagen en el visor:", e2)
+
 
 if __name__ == "__main__":
     from PyQt5.QtWidgets import QApplication
