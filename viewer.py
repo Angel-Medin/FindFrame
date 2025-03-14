@@ -49,6 +49,11 @@ class ImageViewer(QMainWindow):
 
         # Sección izquierda: Miniaturas verticales
         self.thumbnails_layout = QVBoxLayout()
+
+        self.btn_update_folder = QPushButton("Actualizar Carpeta")
+        self.thumbnails_layout.addWidget(self.btn_update_folder)
+        self.btn_update_folder.clicked.connect(self.update_image_url)
+
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFixedWidth(320)  # Aumentar ancho para 3 columnas
@@ -125,6 +130,45 @@ class ImageViewer(QMainWindow):
         self.index = 0
         self.show_image()
         self.load_thumbnails()
+
+
+    def update_image_url(self):
+        """
+        Actualiza las rutas de las imágenes en la base de datos.  
+        Abre un cuadro de diálogo para seleccionar una carpeta, obtiene las imágenes y actualiza su ruta si ya existen en la base de datos; de lo contrario, las agrega.
+        """
+        folder = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta")
+        if not folder:
+            return
+
+        # Obtener rutas de imágenes usando pathlib
+        self.image_paths = get_image_paths(Path(folder))
+
+        if not self.image_paths:
+            self.image_label.setText("📭 No se encontraron imágenes a actualizar.")
+            self.btn_next.setEnabled(False)
+            self.btn_prev.setEnabled(False)
+            return
+
+        # Actualizamos las URLs en la BD
+        for path in self.image_paths:
+            img_name = path.name  # Nombre del archivo
+            new_path = str(Path(folder) / path.name)  # Nueva ruta completa
+
+            # Verificar si la imagen ya existe en la base de datos
+            cursor = self.tag_manager.conn.cursor()
+            cursor.execute("SELECT id FROM img WHERE name = ?", (img_name,))
+            result = cursor.fetchone()
+
+            if result:  # Si ya existe, actualizamos su ruta
+                self.tag_manager.update_image_urla(img_name, str(path))
+            else:  # Si no existe, agregamos una nueva entrada
+                self.tag_manager.insert_new_image(img_name, str(path))
+
+        self.show_image()  # Mostrar la nueva imagen
+        self.btn_prev.setEnabled(self.index > 0)
+        self.btn_next.setEnabled(self.index < len(self.image_paths) - 1)
+
 
     def show_image(self):
         if not self.image_paths:

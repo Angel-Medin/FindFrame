@@ -66,6 +66,17 @@ class TagManagerSQLite:
                           (name, str(path)))
         self.conn.commit()
 
+    def update_image_url(self,img_name,new_image_path):
+        """
+        Actualiza la ruta de una imagen basado en su nombre.
+        Args:
+            imag_name(str): Nombre de la imagen
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("UPDATE img SET path = ? WHERE name = ?",(new_image_path,img_name))
+        self.conn.commit()
+
+
     def get_image_id(self, image_path):
         """
         Obtiene el ID de una imagen basado en su ruta.
