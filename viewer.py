@@ -25,6 +25,11 @@ class ImageViewer(QMainWindow):
         self.setCentralWidget(self.central_widget)
         self.main_layout = QVBoxLayout(self.central_widget)
 
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.central_widget.setFocusPolicy(Qt.StrongFocus)
+        self.central_widget.setFocus() 
+
+
         # Botón para cargar carpeta
         self.btn_load = QPushButton("📂 Cargar Carpeta")
         self.btn_load.clicked.connect(self.load_folder)
@@ -57,6 +62,9 @@ class ImageViewer(QMainWindow):
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFixedWidth(320)  # Aumentar ancho para 3 columnas
+
+        self.scroll_area.setFocusPolicy(Qt.NoFocus)
+
         self.scroll_widget = QWidget()
         self.scroll_layout = QGridLayout(self.scroll_widget)  # Cambiar a QGridLayout
         self.scroll_layout.setContentsMargins(0, 0, 0, 0)
@@ -314,6 +322,27 @@ class ImageViewer(QMainWindow):
                 os.startfile(current_image)
             except Exception as e2:
                 print("Error al abrir la imagen en el visor:", e2)
+
+
+    def keyPressEvent(self, event):
+        if not self.image_paths:
+            return super().keyPressEvent(event)
+        
+        if event.key() == Qt.Key_Left:
+            self.index = max(0, self.index - 1)
+        elif event.key() == Qt.Key_Right:
+            self.index = min(len(self.image_paths) - 1, self.index + 1)
+        elif event.key() == Qt.Key_Down:
+            self.index = min(len(self.image_paths) - 1, self.index + 3)
+        elif event.key() == Qt.Key_Up:
+            self.index = max(0, self.index - 3)
+        else:
+            return super().keyPressEvent(event)
+        
+        self.show_image()
+        self.highlight_thumbnail()
+
+
 
 
 if __name__ == "__main__":
