@@ -6,5 +6,13 @@ def get_image_paths(folder: Path):
     los archivos de imagen en la carpeta (incluyendo subcarpetas)
     con extensiones .jpg, .jpeg, .png, .bmp y .gif.
     """
-    image_extensions = {".jpg", ".jpeg", ".png", ".bmp", ".gif"}
-    return sorted([path for path in folder.rglob("*") if path.suffix.lower() in image_extensions])
+    image_extensions = {".jpg", ".webp", ".jpeg", ".png", ".bmp", ".gif"}
+    
+    # Obtenemos todas las imágenes
+    images = [path for path in folder.rglob("*") 
+             if path.suffix.lower() in image_extensions]
+    
+    # Ordenamos por fecha de modificación (st_mtime = timestamp de modificación)
+    images.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    
+    return images

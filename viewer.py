@@ -2,7 +2,7 @@ from pathlib import Path
 from PyQt5.QtWidgets import (
     QMainWindow, QPushButton, QLabel, QFileDialog,
     QVBoxLayout, QWidget, QHBoxLayout, QScrollArea,
-    QFrame, QListWidget, QLineEdit, QSizePolicy
+    QFrame, QListWidget, QLineEdit, QSizePolicy, QGridLayout
 )
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt
@@ -12,7 +12,7 @@ from tag_manager import TagManagerSQLite
 class ImageViewer(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Visor de Imágenes (Final)")
+        self.setWindowTitle("Visor de Imágenes")
         self.setGeometry(100, 100, 1000, 700)
         self.image_paths = []   # Se guardan objetos Path
         self.index = 0
@@ -30,7 +30,7 @@ class ImageViewer(QMainWindow):
         self.btn_load.clicked.connect(self.load_folder)
         self.main_layout.addWidget(self.btn_load)
 
-        # Filtros: campos para etiquetas positivas y negativas, y botón para aplicar filtro.
+        # Filtros
         self.filter_layout = QHBoxLayout()
         self.positive_tags_input = QLineEdit()
         self.positive_tags_input.setPlaceholderText("Etiquetas positivas (separadas por comas)")
@@ -43,24 +43,37 @@ class ImageViewer(QMainWindow):
         self.filter_layout.addWidget(self.btn_apply_filters)
         self.main_layout.addLayout(self.filter_layout)
 
-        # Layout principal dividido en dos secciones: izquierda (imagen, navegación, miniaturas) y derecha (etiquetas)
+        # Layout principal: miniaturas | contenido | etiquetas
         self.content_layout = QHBoxLayout()
         self.main_layout.addLayout(self.content_layout)
 
-        # Sección izquierda
-        self.left_layout = QVBoxLayout()
-        self.content_layout.addLayout(self.left_layout, 3)
+        # Sección izquierda: Miniaturas verticales
+        self.thumbnails_layout = QVBoxLayout()
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFixedWidth(320)  # Aumentar ancho para 3 columnas
+        self.scroll_widget = QWidget()
+        self.scroll_layout = QGridLayout(self.scroll_widget)  # Cambiar a QGridLayout
+        self.scroll_layout.setContentsMargins(0, 0, 0, 0)
+        self.scroll_layout.setSpacing(2)  # Pequeño espacio entre miniaturas
+        self.scroll_area.setWidget(self.scroll_widget)
+        self.thumbnails_layout.addWidget(self.scroll_area)
+        self.content_layout.addLayout(self.thumbnails_layout, 1)
+
+        # Sección central: Imagen y navegación
+        self.center_layout = QVBoxLayout()
+        self.content_layout.addLayout(self.center_layout, 4)  # Proporción 4
 
         self.image_label = QLabel("No hay imagen cargada", alignment=Qt.AlignCenter)
         self.image_label.setStyleSheet("border: 1px solid black;")
         self.image_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         self.image_label.setMinimumSize(100,100)
-        self.left_layout.addWidget(self.image_label)
+        self.center_layout.addWidget(self.image_label)
 
         self.filename_label = QLabel("", alignment=Qt.AlignCenter)
         self.filename_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.filename_label.setMaximumHeight(40)
-        self.left_layout.addWidget(self.filename_label)
+        self.center_layout.addWidget(self.filename_label)
 
         self.nav_layout = QHBoxLayout()
         self.btn_prev = QPushButton("◀ Anterior")
@@ -71,19 +84,11 @@ class ImageViewer(QMainWindow):
         self.btn_next.clicked.connect(self.show_next)
         self.btn_next.setEnabled(False)
         self.nav_layout.addWidget(self.btn_next)
-        self.left_layout.addLayout(self.nav_layout)
+        self.center_layout.addLayout(self.nav_layout)
 
-        self.scroll_area = QScrollArea()
-        self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setFixedHeight(120)
-        self.scroll_widget = QWidget()
-        self.scroll_layout = QHBoxLayout(self.scroll_widget)
-        self.scroll_area.setWidget(self.scroll_widget)
-        self.left_layout.addWidget(self.scroll_area)
-
-        # Sección derecha: gestión de etiquetas
+        # Sección derecha: etiquetas
         self.right_layout = QVBoxLayout()
-        self.content_layout.addLayout(self.right_layout, 1)
+        self.content_layout.addLayout(self.right_layout, 1)  # Proporción 1
         self.tag_title = QLabel("Etiquetas de la imagen", alignment=Qt.AlignCenter)
         self.right_layout.addWidget(self.tag_title)
         self.tag_list = QListWidget()
@@ -97,6 +102,12 @@ class ImageViewer(QMainWindow):
         self.btn_remove_tag = QPushButton("Eliminar Etiqueta")
         self.btn_remove_tag.clicked.connect(self.remove_tag)
         self.right_layout.addWidget(self.btn_remove_tag)
+
+        self.btn_open_external = QPushButton("Abrir Ubicación")
+        self.btn_open_external.clicked.connect(self.external_app)
+        self.right_layout.addWidget(self.btn_open_external)
+
+
 
     def load_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta")
@@ -118,17 +129,24 @@ class ImageViewer(QMainWindow):
     def show_image(self):
         if not self.image_paths:
             return
-        pixmap = QPixmap(str(self.image_paths[self.index]))
-        if pixmap.isNull():
+        try:
+            pixmap = QPixmap(str(self.image_paths[self.index]))
+            if pixmap.isNull():
+                raise ValueError("No se pudo cargar la imagen.")
+        except Exception as e:
+            print("Error al cargar la imagen:", e)
             self.image_label.setText("No se pudo cargar la imagen.")
-        else:
-            self.image_label.setPixmap(
-                pixmap.scaled(self.image_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            )
+            return
+
+        self.image_label.setPixmap(
+            pixmap.scaled(self.image_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        )
         self.filename_label.setText(f"{self.image_paths[self.index].name} ({self.index+1}/{len(self.image_paths)})")
         self.update_tag_list()
         self.btn_prev.setEnabled(self.index > 0)
         self.btn_next.setEnabled(self.index < len(self.image_paths) - 1)
+
+        self.highlight_thumbnail()
 
     def show_next(self):
         if self.index < len(self.image_paths) - 1:
@@ -156,8 +174,24 @@ class ImageViewer(QMainWindow):
             thumb_label.setAlignment(Qt.AlignCenter)
             thumb_label.setFrameShape(QFrame.Box)
             thumb_label.mousePressEvent = lambda event, i=idx: self.thumbnail_clicked(i)
-            self.scroll_layout.addWidget(thumb_label)
+            
+            # Calcular posición en la grilla (3 columnas)
+            row = idx // 3
+            col = idx % 3
+            self.scroll_layout.addWidget(thumb_label, row, col, Qt.AlignCenter)
             self.thumbnail_labels.append(thumb_label)
+
+        # Asegurar que el layout se expanda correctamente
+        self.scroll_widget.adjustSize()
+
+    
+    def highlight_thumbnail(self):
+        """Resalta la miniatura de la imagen actual"""
+        for i, thumb_label in enumerate(self.thumbnail_labels):
+            if i == self.index:
+                thumb_label.setStyleSheet("border: 5px solid red;")
+            else:
+                thumb_label.setStyleSheet("")
 
     def thumbnail_clicked(self, index):
         self.index = index
@@ -215,6 +249,28 @@ class ImageViewer(QMainWindow):
         if self.image_paths:
             self.show_image()
         super().resizeEvent(event)
+
+
+    def external_app(self):
+        import os
+        import subprocess
+
+        if not self.image_paths:
+            return
+
+        current_image = str(self.image_paths[self.index])
+        
+        try:
+            # Opción 1: Abrir la carpeta contenedora y seleccionar la imagen en Windows Explorer.
+            subprocess.Popen(["explorer", "/select,", current_image])
+        except Exception as e:
+            print("Error al abrir la carpeta. Abriendo la imagen en el visor por defecto:", e)
+            try:
+                # Opción 2: Abrir la imagen con la aplicación predeterminada de Windows.
+                os.startfile(current_image)
+            except Exception as e2:
+                print("Error al abrir la imagen en el visor:", e2)
+
 
 if __name__ == "__main__":
     from PyQt5.QtWidgets import QApplication
