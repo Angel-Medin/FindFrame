@@ -12,7 +12,7 @@ from tag_manager import TagManagerSQLite
 class ImageViewer(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Visor de Imágenes (Final)")
+        self.setWindowTitle("Visor de Imágenes")
         self.setGeometry(100, 100, 1000, 700)
         self.image_paths = []   # Se guardan objetos Path
         self.index = 0
