@@ -9,7 +9,7 @@ def get_image_paths(folder: Path):
     image_extensions = {".jpg", ".webp", ".jpeg", ".png",".jfif" ,".bmp", ".gif"}
     
     # Obtenemos todas las imágenes
-    images = [path for path in folder.rglob("*") 
+    images = [path for path in folder.glob("*") 
              if path.suffix.lower() in image_extensions]
     
     # Ordenamos por fecha de modificación (st_mtime = timestamp de modificación)

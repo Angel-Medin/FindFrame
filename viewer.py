@@ -212,36 +212,67 @@ class ImageViewer(QMainWindow):
             self.show_image()
 
     def load_thumbnails(self):
+        #1. Limpieza del layout anterior
         while self.scroll_layout.count():
             child = self.scroll_layout.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
         self.thumbnail_labels = []
+
+        #2. Iterar sobre cada imagen
         for idx, path in enumerate(self.image_paths):
+            if not path.exists():
+                continue
+
             thumb_label = QLabel()
-            thumb_label.setFixedSize(100, 100)
-            pix = QPixmap(str(path))
-            if pix.isNull():
-                pix = QPixmap("assets/placeholder.png")
-            thumb_label.setPixmap(pix.scaled(100, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            thumb_label.image_path = path
+            thumb_label.setFixedSize(100,100)
+
+            #3. Crear o cargar miniatura cacheada
+            thumb_folder = path.parent / ".thumbnails"
+            thumb_folder.mkdir(parents= True, exist_ok=True) #Asegura que exista
+            thumb_path = thumb_folder / path.name #Usa el mismo nombre de archivo
+
+            if not thumb_path.exists():
+                original_pixmap = QPixmap(str(path))
+                if not original_pixmap.isNull():
+                    thumbnail = original_pixmap.scaled(100,100,Qt.KeepAspectRatio, Qt.FastTransformation)
+                    thumbnail.save(str(thumb_path)) #Guarda la miniatura en disco
+                else:
+                    thumbnail = QPixmap("assets/placeholder.png")
+            else:
+                thumbnail = QPixmap(str(thumb_path))
+                if thumbnail.isNull():
+                    thumbnail = QPixmap("assets/placeholder.png")
+            
+            #4. Asignar miniatura al Qlabel
+            thumb_label.setPixmap(thumbnail.scaled(100, 100, Qt.KeepAspectRatio, Qt.FastTransformation))
             thumb_label.setAlignment(Qt.AlignCenter)
             thumb_label.setFrameShape(QFrame.Box)
+
+            #5. Capturar idx en el lambda
             thumb_label.mousePressEvent = lambda event, i=idx: self.thumbnail_clicked(i)
-            
-            # Calcular posición en la grilla (3 columnas)
+
+            #6. Anhadir al grid de 3 columnas
             row = idx // 3
             col = idx % 3
             self.scroll_layout.addWidget(thumb_label, row, col, Qt.AlignCenter)
             self.thumbnail_labels.append(thumb_label)
 
-        # Asegurar que el layout se expanda correctamente
+            #7 Guardar referencia
+            self.thumbnail_labels.append(thumb_label)
+        
+        self.highlight_thumbnail()
+
+        #. Asegurar que el layout se expanda correctamente
         self.scroll_widget.adjustSize()
 
     
     def highlight_thumbnail(self):
         """Resalta la miniatura de la imagen actual"""
-        for i, thumb_label in enumerate(self.thumbnail_labels):
-            if i == self.index:
+        current_path = self.image_paths[self.index]
+        for thumb_label in self.thumbnail_labels:
+            if getattr(thumb_label, "image_path", None) == current_path:
                 thumb_label.setStyleSheet("border: 5px solid red;")
             else:
                 thumb_label.setStyleSheet("")
