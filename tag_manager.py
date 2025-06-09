@@ -66,15 +66,34 @@ class TagManagerSQLite:
                           (name, str(path)))
         self.conn.commit()
 
-    def update_image_url(self,img_name,new_image_path):
-        """
-        Actualiza la ruta de una imagen basado en su nombre.
-        Args:
-            imag_name(str): Nombre de la imagen
-        """
+    def update_image_url(self, img_name, new_image_path):
         cursor = self.conn.cursor()
-        cursor.execute("UPDATE img SET path = ? WHERE name = ?",(new_image_path,img_name))
-        self.conn.commit()
+        # Consultar todos los registros con el nombre especificado, ordenados por id
+        cursor.execute("SELECT id, path FROM img WHERE name = ? ORDER BY id", (img_name,))
+        results = cursor.fetchall()
+        
+        if not results:
+            print(f"No se encontró ninguna imagen con el nombre: {img_name}")
+            return
+
+        # Mantener el primer registro (el de menor id)
+        record_to_update = results[0][0]
+        
+        # Si existen duplicados, eliminarlos
+        if len(results) > 1:
+            duplicate_ids = [str(record[0]) for record in results[1:]]
+            query = f"DELETE FROM img WHERE id IN ({','.join(['?']*len(duplicate_ids))})"
+            cursor.execute(query, duplicate_ids)
+            self.conn.commit()
+            print(f"Se eliminaron {len(duplicate_ids)} registros duplicados para '{img_name}'.")
+
+        # Actualizar la ruta del registro que se mantuvo
+        try:
+            cursor.execute("UPDATE img SET path = ? WHERE id = ?", (new_image_path, record_to_update))
+            self.conn.commit()
+            
+        except sqlite3.IntegrityError as e:
+            print("Error al actualizar el path:", e)
 
 
     def get_image_id(self, image_path):

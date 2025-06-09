@@ -169,11 +169,12 @@ class ImageViewer(QMainWindow):
             result = cursor.fetchone()
 
             if result:  # Si ya existe, actualizamos su ruta
-                self.tag_manager.update_image_urla(img_name, str(path))
+                self.tag_manager.update_image_url(img_name, str(path))
             else:  # Si no existe, agregamos una nueva entrada
-                self.tag_manager.insert_new_image(img_name, str(path))
+                self.tag_manager.initialize_images([Path(new_path)])
 
         self.show_image()  # Mostrar la nueva imagen
+        self.load_thumbnails()
         self.btn_prev.setEnabled(self.index > 0)
         self.btn_next.setEnabled(self.index < len(self.image_paths) - 1)
 

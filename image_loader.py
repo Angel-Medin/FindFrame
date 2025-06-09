@@ -6,7 +6,7 @@ def get_image_paths(folder: Path):
     los archivos de imagen en la carpeta (incluyendo subcarpetas)
     con extensiones .jpg, .jpeg, .png, .bmp y .gif.
     """
-    image_extensions = {".jpg", ".webp", ".jpeg", ".png", ".bmp", ".gif"}
+    image_extensions = {".jpg", ".webp", ".jpeg", ".png",".jfif" ,".bmp", ".gif"}
     
     # Obtenemos todas las imágenes
     images = [path for path in folder.rglob("*") 
