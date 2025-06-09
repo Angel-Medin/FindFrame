@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 from PyQt5.QtWidgets import (
     QMainWindow, QPushButton, QLabel, QFileDialog,
     QVBoxLayout, QWidget, QHBoxLayout, QScrollArea,
@@ -142,39 +143,47 @@ class ImageViewer(QMainWindow):
 
     def update_image_url(self):
         """
-        Actualiza las rutas de las imágenes en la base de datos.  
-        Abre un cuadro de diálogo para seleccionar una carpeta, obtiene las imágenes y actualiza su ruta si ya existen en la base de datos; de lo contrario, las agrega.
+        Actualiza las rutas de las imágenes en la base de datos.
+        Resetea el índice, maneja errores y evita crashes si self.index queda fuera de rango.
         """
         folder = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta")
         if not folder:
             return
 
-        # Obtener rutas de imágenes usando pathlib
-        self.image_paths = get_image_paths(Path(folder))
-
-        if not self.image_paths:
+        # 1) Obtener rutas nuevas
+        new_paths = get_image_paths(Path(folder))
+        if not new_paths:
             self.image_label.setText("📭 No se encontraron imágenes a actualizar.")
             self.btn_next.setEnabled(False)
             self.btn_prev.setEnabled(False)
             return
 
-        # Actualizamos las URLs en la BD
-        for path in self.image_paths:
-            img_name = path.name  # Nombre del archivo
-            new_path = str(Path(folder) / path.name)  # Nueva ruta completa
-
-            # Verificar si la imagen ya existe en la base de datos
+        # 2) Actualizar BD
+        for path in new_paths:
+            img_name = path.name
             cursor = self.tag_manager.conn.cursor()
             cursor.execute("SELECT id FROM img WHERE name = ?", (img_name,))
             result = cursor.fetchone()
-
-            if result:  # Si ya existe, actualizamos su ruta
+            if result:
                 self.tag_manager.update_image_url(img_name, str(path))
-            else:  # Si no existe, agregamos una nueva entrada
-                self.tag_manager.initialize_images([Path(new_path)])
+            else:
+                self.tag_manager.initialize_images([path])
 
-        self.show_image()  # Mostrar la nueva imagen
-        self.load_thumbnails()
+        # 3) Reemplazar la lista y resetear el índice
+        self.image_paths = new_paths
+        self.index = 0
+
+        # 4) Mostrar con protección contra errores
+        try:
+            self.show_image()
+            self.load_thumbnails()
+        except Exception as e:
+            print("Error al actualizar la carpeta y recargar imágenes:", e)
+            # Opcional: aviso al usuario
+            self.image_label.setText("Error al recargar vistas.")
+            return
+
+        # 5) Ajustar botones de navegación
         self.btn_prev.setEnabled(self.index > 0)
         self.btn_next.setEnabled(self.index < len(self.image_paths) - 1)
 
@@ -212,59 +221,74 @@ class ImageViewer(QMainWindow):
             self.show_image()
 
     def load_thumbnails(self):
-        #1. Limpieza del layout anterior
+            # Ruta del log de errores
+        errores_log = Path.cwd() / "errores.txt"
+
+        # 1. Limpieza del layout anterior
         while self.scroll_layout.count():
             child = self.scroll_layout.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
         self.thumbnail_labels = []
 
-        #2. Iterar sobre cada imagen
-        for idx, path in enumerate(self.image_paths):
+        # 2. Iterar sobre cada ruta en image_paths
+        for path in self.image_paths:
+            # 2.1 Si no existe el archivo, loguear y saltar
             if not path.exists():
+                with open(errores_log, "a", encoding="utf-8") as f:
+                    f.write(f"No existe: {path}\n")
                 continue
 
-            thumb_label = QLabel()
-            thumb_label.image_path = path
-            thumb_label.setFixedSize(100,100)
+            # 2.2 Intentar cargar la imagen original
+            original_pixmap = QPixmap(str(path))
+            if original_pixmap.isNull():
+                with open(errores_log, "a", encoding="utf-8") as f:
+                    f.write(f"No pudo cargarse: {path}\n")
+                continue
 
-            #3. Crear o cargar miniatura cacheada
+            # 3. Preparar carpeta de cache y ruta de miniatura
             thumb_folder = path.parent / ".thumbnails"
-            thumb_folder.mkdir(parents= True, exist_ok=True) #Asegura que exista
-            thumb_path = thumb_folder / path.name #Usa el mismo nombre de archivo
+            thumb_folder.mkdir(parents=True, exist_ok=True)
+            thumb_path = thumb_folder / path.name
 
+            # 4. Generar/recuperar miniatura cacheada
             if not thumb_path.exists():
-                original_pixmap = QPixmap(str(path))
-                if not original_pixmap.isNull():
-                    thumbnail = original_pixmap.scaled(100,100,Qt.KeepAspectRatio, Qt.FastTransformation)
-                    thumbnail.save(str(thumb_path)) #Guarda la miniatura en disco
-                else:
-                    thumbnail = QPixmap("assets/placeholder.png")
+                thumbnail = original_pixmap.scaled(
+                    100, 100, Qt.KeepAspectRatio, Qt.FastTransformation
+                )
+                thumbnail.save(str(thumb_path))
             else:
                 thumbnail = QPixmap(str(thumb_path))
                 if thumbnail.isNull():
-                    thumbnail = QPixmap("assets/placeholder.png")
-            
-            #4. Asignar miniatura al Qlabel
-            thumb_label.setPixmap(thumbnail.scaled(100, 100, Qt.KeepAspectRatio, Qt.FastTransformation))
+                    # Regenerar si la cache está corrupta
+                    thumbnail = original_pixmap.scaled(
+                        100, 100, Qt.KeepAspectRatio, Qt.FastTransformation
+                    )
+                    thumbnail.save(str(thumb_path))
+
+            # 5. Crear QLabel para la miniatura
+            thumb_label = QLabel()
+            thumb_label.setFixedSize(100, 100)
+            thumb_label.setPixmap(thumbnail)
             thumb_label.setAlignment(Qt.AlignCenter)
             thumb_label.setFrameShape(QFrame.Box)
 
-            #5. Capturar idx en el lambda
-            thumb_label.mousePressEvent = lambda event, i=idx: self.thumbnail_clicked(i)
+            # 6. Vincular ruta y evento de clic buscándolo dinámicamente
+            thumb_label.image_path = path
+            def make_handler(label):
+                return lambda ev: self.thumbnail_clicked(
+                    self.image_paths.index(label.image_path)
+                )
+            thumb_label.mousePressEvent = make_handler(thumb_label)
 
-            #6. Anhadir al grid de 3 columnas
-            row = idx // 3
-            col = idx % 3
+            # 7. Añadir al grid de 3 columnas usando el tamaño actual de thumbnail_labels
+            idx = len(self.thumbnail_labels)
+            row, col = divmod(idx, 3)
             self.scroll_layout.addWidget(thumb_label, row, col, Qt.AlignCenter)
             self.thumbnail_labels.append(thumb_label)
 
-            #7 Guardar referencia
-            self.thumbnail_labels.append(thumb_label)
-        
+        # 8. Resaltar la miniatura activa y ajustar scroll
         self.highlight_thumbnail()
-
-        #. Asegurar que el layout se expanda correctamente
         self.scroll_widget.adjustSize()
 
     
