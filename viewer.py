@@ -1,38 +1,100 @@
-from pathlib import Path
 import os
-from PyQt5.QtWidgets import (
-    QMainWindow, QPushButton, QLabel, QFileDialog,
-    QVBoxLayout, QWidget, QHBoxLayout, QScrollArea,
-    QFrame, QListWidget, QLineEdit, QSizePolicy, QGridLayout
-)
+import subprocess
+from pathlib import Path
+
+from PyQt5.QtCore import QObject, Qt, pyqtSignal, QThread
 from PyQt5.QtGui import QPixmap
-from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QPushButton, QLabel,
+                             QFileDialog, QVBoxLayout, QWidget, QHBoxLayout,
+                             QScrollArea, QFrame, QListWidget, QLineEdit,
+                             QSizePolicy, QGridLayout)
+
 from image_loader import get_image_paths
 from tag_manager import TagManagerSQLite
+
+# --- NUEVA CLASE WORKER ---
+# Este objeto QObject se ejecutará en un hilo secundario para no bloquear la GUI.
+class ThumbnailWorker(QObject):
+    # Señales para comunicarse con el hilo principal de la GUI
+    thumbnail_ready = pyqtSignal(Path, QPixmap, int)  # Envía la ruta, el pixmap y el índice de la miniatura
+    finished = pyqtSignal()                         # Indica que ha terminado el proceso
+
+    def __init__(self, image_paths, parent=None):
+        super().__init__(parent)
+        self.image_paths = image_paths
+        self.is_running = True
+
+    # El método principal que se ejecutará en el hilo secundario
+    def process_thumbnails(self):
+        """
+        Procesa cada ruta de imagen, genera/carga la miniatura y emite una señal.
+        """
+        errores_log = Path.cwd() / "errores.txt"
+        
+        for index, path in enumerate(self.image_paths):
+            if not self.is_running:
+                break # Permite detener el proceso si se carga una nueva carpeta
+
+            if not path.exists():
+                with open(errores_log, "a", encoding="utf-8") as f:
+                    f.write(f"No existe: {path}\n")
+                continue
+
+            thumb_folder = path.parent / ".thumbnails"
+            thumb_folder.mkdir(parents=True, exist_ok=True)
+            thumb_path = thumb_folder / path.name
+
+            thumbnail = None
+            if thumb_path.exists():
+                thumbnail = QPixmap(str(thumb_path))
+                if thumbnail.isNull(): # Cache corrupta
+                    thumbnail = None
+
+            if thumbnail is None:
+                original_pixmap = QPixmap(str(path))
+                if original_pixmap.isNull():
+                    with open(errores_log, "a", encoding="utf-8") as f:
+                        f.write(f"No pudo cargarse: {path}\n")
+                    continue
+                thumbnail = original_pixmap.scaled(100, 100, Qt.KeepAspectRatio, Qt.FastTransformation)
+                thumbnail.save(str(thumb_path))
+            
+            # Emite la señal con los datos listos para que la GUI los use
+            self.thumbnail_ready.emit(path, thumbnail, index)
+            
+        self.finished.emit()
+
+    def stop(self):
+        self.is_running = False
 
 class ImageViewer(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Visor de Imágenes")
         self.setGeometry(100, 100, 1000, 700)
-        self.image_paths = []   # Se guardan objetos Path
+        self.image_paths = []
         self.index = 0
         self.thumbnail_labels = []
         self.tag_manager = TagManagerSQLite()
+        
+        # Atributos para el hilo de carga de miniaturas
+        self.thread = None
+        self.worker = None
+
         self.setup_ui()
 
     def setup_ui(self):
+        # ... (El resto del setup_ui es idéntico al original)
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         self.main_layout = QVBoxLayout(self.central_widget)
 
         self.setFocusPolicy(Qt.StrongFocus)
         self.central_widget.setFocusPolicy(Qt.StrongFocus)
-        self.central_widget.setFocus() 
-
+        self.central_widget.setFocus()
 
         # Botón para cargar carpeta
-        self.btn_load = QPushButton("📂 Cargar Carpeta")
+        self.btn_load = QPushButton("Cargar Carpeta")
         self.btn_load.clicked.connect(self.load_folder)
         self.main_layout.addWidget(self.btn_load)
 
@@ -49,46 +111,39 @@ class ImageViewer(QMainWindow):
         self.filter_layout.addWidget(self.btn_apply_filters)
         self.main_layout.addLayout(self.filter_layout)
 
-        # Layout principal: miniaturas | contenido | etiquetas
+        # Layout principal
         self.content_layout = QHBoxLayout()
         self.main_layout.addLayout(self.content_layout)
 
-        # Sección izquierda: Miniaturas verticales
+        # Sección izquierda: Miniaturas
         self.thumbnails_layout = QVBoxLayout()
-
         self.btn_update_folder = QPushButton("Actualizar Carpeta")
         self.thumbnails_layout.addWidget(self.btn_update_folder)
         self.btn_update_folder.clicked.connect(self.update_image_url)
-
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setFixedWidth(320)  # Aumentar ancho para 3 columnas
-
+        self.scroll_area.setFixedWidth(320)
         self.scroll_area.setFocusPolicy(Qt.NoFocus)
-
         self.scroll_widget = QWidget()
-        self.scroll_layout = QGridLayout(self.scroll_widget)  # Cambiar a QGridLayout
+        self.scroll_layout = QGridLayout(self.scroll_widget) # QGridLayout
         self.scroll_layout.setContentsMargins(0, 0, 0, 0)
-        self.scroll_layout.setSpacing(2)  # Pequeño espacio entre miniaturas
+        self.scroll_layout.setSpacing(2)
         self.scroll_area.setWidget(self.scroll_widget)
         self.thumbnails_layout.addWidget(self.scroll_area)
         self.content_layout.addLayout(self.thumbnails_layout, 1)
 
         # Sección central: Imagen y navegación
         self.center_layout = QVBoxLayout()
-        self.content_layout.addLayout(self.center_layout, 4)  # Proporción 4
-
+        self.content_layout.addLayout(self.center_layout, 4)
         self.image_label = QLabel("No hay imagen cargada", alignment=Qt.AlignCenter)
         self.image_label.setStyleSheet("border: 1px solid black;")
         self.image_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
-        self.image_label.setMinimumSize(100,100)
+        self.image_label.setMinimumSize(100, 100)
         self.center_layout.addWidget(self.image_label)
-
         self.filename_label = QLabel("", alignment=Qt.AlignCenter)
         self.filename_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.filename_label.setMaximumHeight(40)
         self.center_layout.addWidget(self.filename_label)
-
         self.nav_layout = QHBoxLayout()
         self.btn_prev = QPushButton("◀ Anterior")
         self.btn_prev.clicked.connect(self.show_previous)
@@ -102,7 +157,7 @@ class ImageViewer(QMainWindow):
 
         # Sección derecha: etiquetas
         self.right_layout = QVBoxLayout()
-        self.content_layout.addLayout(self.right_layout, 1)  # Proporción 1
+        self.content_layout.addLayout(self.right_layout, 1)
         self.tag_title = QLabel("Etiquetas de la imagen", alignment=Qt.AlignCenter)
         self.right_layout.addWidget(self.tag_title)
         self.tag_list = QListWidget()
@@ -116,100 +171,156 @@ class ImageViewer(QMainWindow):
         self.btn_remove_tag = QPushButton("Eliminar Etiqueta")
         self.btn_remove_tag.clicked.connect(self.remove_tag)
         self.right_layout.addWidget(self.btn_remove_tag)
-
         self.btn_open_external = QPushButton("Abrir Ubicación")
         self.btn_open_external.clicked.connect(self.external_app)
         self.right_layout.addWidget(self.btn_open_external)
-
-
 
     def load_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta")
         if not folder:
             return
-        # Usar pathlib para obtener las rutas de imágenes
+
         self.image_paths = get_image_paths(Path(folder))
         if not self.image_paths:
-            self.image_label.setText("📭 No se encontraron imágenes.")
+            self.image_label.setText("No se encontraron imágenes.")
             self.btn_next.setEnabled(False)
             self.btn_prev.setEnabled(False)
             return
-        # Inicializamos la tabla de imágenes en la BD
+
         self.tag_manager.initialize_images(self.image_paths)
         self.index = 0
         self.show_image()
-        self.load_thumbnails()
+        # En lugar de llamar a la función que bloquea, iniciamos el hilo
+        self.load_thumbnails_threaded()
+
+    def load_thumbnails_threaded(self):
+        # Detener el hilo anterior si todavía está en ejecución
+        # Esta comprobación ahora es segura porque `self.thread` será None si el anterior terminó.
+        if self.thread is not None and self.thread.isRunning():
+            self.worker.stop()
+            self.thread.quit()
+            self.thread.wait() # Espera a que el hilo termine limpiamente
+
+        self.clear_thumbnails_layout()
+
+        self.thread = QThread()
+        self.worker = ThumbnailWorker(self.image_paths)
+        self.worker.moveToThread(self.thread)
+
+        self.thread.started.connect(self.worker.process_thumbnails)
+        self.worker.finished.connect(self.thread.quit)
+        
+        # Sigue siendo correcto eliminar los objetos para evitar fugas de memoria
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+        
+        # --- CAMBIO CLAVE ---
+        # Conectamos la señal finished a nuestro nuevo método de limpieza
+        self.thread.finished.connect(self._clear_thread_references)
+
+        self.worker.thumbnail_ready.connect(self.add_thumbnail)
+        self.thread.start()
+
+    
+    def _clear_thread_references(self):
+        """Slot para limpiar las referencias al hilo y al worker una vez que han terminado."""
+        self.worker = None
+        self.thread = None
+
+
+    def add_thumbnail(self, path, pixmap, index):
+        # ... (Este método no cambia)
+        thumb_label = QLabel()
+        thumb_label.setFixedSize(100, 100)
+        thumb_label.setPixmap(pixmap)
+        thumb_label.setAlignment(Qt.AlignCenter)
+        thumb_label.setFrameShape(QFrame.Box)
+        
+        thumb_label.setProperty("image_path", path)
+        thumb_label.mousePressEvent = lambda event, idx=index: self.thumbnail_clicked(idx)
+
+        row, col = divmod(len(self.thumbnail_labels), 3)
+        self.scroll_layout.addWidget(thumb_label, row, col, Qt.AlignCenter)
+        self.thumbnail_labels.append(thumb_label)
+        
+        if self.index == index:
+            self.highlight_thumbnail()
+    
+
+    def clear_thumbnails_layout(self):
+        # ... (Este método no cambia)
+        while self.scroll_layout.count():
+            child = self.scroll_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+        self.thumbnail_labels = []
+
+    def highlight_thumbnail(self):
+        # ... (Este método no cambia)
+        if not self.image_paths:
+            return
+        current_path = self.image_paths[self.index]
+        for thumb_label in self.thumbnail_labels:
+            if thumb_label.property("image_path") == current_path:
+                thumb_label.setStyleSheet("border: 5px solid red;")
+                self.scroll_area.ensureWidgetVisible(thumb_label)
+            else:
+                thumb_label.setStyleSheet("")
+
+
+
 
 
     def update_image_url(self):
-        """
-        Actualiza las rutas de las imágenes en la base de datos.
-        Resetea el índice, maneja errores y evita crashes si self.index queda fuera de rango.
-        """
         folder = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta")
-        if not folder:
-            return
-
-        # 1) Obtener rutas nuevas
+        if not folder: return
         new_paths = get_image_paths(Path(folder))
         if not new_paths:
-            self.image_label.setText("📭 No se encontraron imágenes a actualizar.")
-            self.btn_next.setEnabled(False)
-            self.btn_prev.setEnabled(False)
+            self.image_label.setText("No se encontraron imágenes a actualizar.")
             return
 
-        # 2) Actualizar BD
         for path in new_paths:
             img_name = path.name
             cursor = self.tag_manager.conn.cursor()
             cursor.execute("SELECT id FROM img WHERE name = ?", (img_name,))
-            result = cursor.fetchone()
-            if result:
+            if cursor.fetchone():
                 self.tag_manager.update_image_url(img_name, str(path))
             else:
                 self.tag_manager.initialize_images([path])
 
-        # 3) Reemplazar la lista y resetear el índice
         self.image_paths = new_paths
         self.index = 0
-
-        # 4) Mostrar con protección contra errores
         try:
             self.show_image()
-            self.load_thumbnails()
+            self.load_thumbnails_threaded() # Usamos la versión con hilos
         except Exception as e:
-            print("Error al actualizar la carpeta y recargar imágenes:", e)
-            # Opcional: aviso al usuario
+            print(f"Error al actualizar la carpeta: {e}")
             self.image_label.setText("Error al recargar vistas.")
-            return
 
-        # 5) Ajustar botones de navegación
         self.btn_prev.setEnabled(self.index > 0)
         self.btn_next.setEnabled(self.index < len(self.image_paths) - 1)
 
 
     def show_image(self):
-        if not self.image_paths:
-            return
+        if not self.image_paths: return
         try:
-            pixmap = QPixmap(str(self.image_paths[self.index]))
+            path_str = str(self.image_paths[self.index])
+            pixmap = QPixmap(path_str)
             if pixmap.isNull():
-                raise ValueError("No se pudo cargar la imagen.")
+                raise ValueError(f"No se pudo cargar la imagen: {path_str}")
+            
+            self.image_label.setPixmap(
+                pixmap.scaled(self.image_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            )
+            self.filename_label.setText(f"{self.image_paths[self.index].name} ({self.index+1}/{len(self.image_paths)})")
+            self.update_tag_list()
+            self.btn_prev.setEnabled(self.index > 0)
+            self.btn_next.setEnabled(self.index < len(self.image_paths) - 1)
+            self.highlight_thumbnail()
         except Exception as e:
-            print("Error al cargar la imagen:", e)
+            print(f"Error al cargar la imagen: {e}")
             self.image_label.setText("No se pudo cargar la imagen.")
-            return
-
-        self.image_label.setPixmap(
-            pixmap.scaled(self.image_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        )
-        self.filename_label.setText(f"{self.image_paths[self.index].name} ({self.index+1}/{len(self.image_paths)})")
-        self.update_tag_list()
-        self.btn_prev.setEnabled(self.index > 0)
-        self.btn_next.setEnabled(self.index < len(self.image_paths) - 1)
-
-        self.highlight_thumbnail()
-
+            
     def show_next(self):
         if self.index < len(self.image_paths) - 1:
             self.index += 1
@@ -220,119 +331,30 @@ class ImageViewer(QMainWindow):
             self.index -= 1
             self.show_image()
 
-    def load_thumbnails(self):
-            # Ruta del log de errores
-        errores_log = Path.cwd() / "errores.txt"
-
-        # 1. Limpieza del layout anterior
-        while self.scroll_layout.count():
-            child = self.scroll_layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
-        self.thumbnail_labels = []
-
-        # 2. Iterar sobre cada ruta en image_paths
-        for path in self.image_paths:
-            # 2.1 Si no existe el archivo, loguear y saltar
-            if not path.exists():
-                with open(errores_log, "a", encoding="utf-8") as f:
-                    f.write(f"No existe: {path}\n")
-                continue
-
-            # 2.2 Intentar cargar la imagen original
-            original_pixmap = QPixmap(str(path))
-            if original_pixmap.isNull():
-                with open(errores_log, "a", encoding="utf-8") as f:
-                    f.write(f"No pudo cargarse: {path}\n")
-                continue
-
-            # 3. Preparar carpeta de cache y ruta de miniatura
-            thumb_folder = path.parent / ".thumbnails"
-            thumb_folder.mkdir(parents=True, exist_ok=True)
-            thumb_path = thumb_folder / path.name
-
-            # 4. Generar/recuperar miniatura cacheada
-            if not thumb_path.exists():
-                thumbnail = original_pixmap.scaled(
-                    100, 100, Qt.KeepAspectRatio, Qt.FastTransformation
-                )
-                thumbnail.save(str(thumb_path))
-            else:
-                thumbnail = QPixmap(str(thumb_path))
-                if thumbnail.isNull():
-                    # Regenerar si la cache está corrupta
-                    thumbnail = original_pixmap.scaled(
-                        100, 100, Qt.KeepAspectRatio, Qt.FastTransformation
-                    )
-                    thumbnail.save(str(thumb_path))
-
-            # 5. Crear QLabel para la miniatura
-            thumb_label = QLabel()
-            thumb_label.setFixedSize(100, 100)
-            thumb_label.setPixmap(thumbnail)
-            thumb_label.setAlignment(Qt.AlignCenter)
-            thumb_label.setFrameShape(QFrame.Box)
-
-            # 6. Vincular ruta y evento de clic buscándolo dinámicamente
-            thumb_label.image_path = path
-            def make_handler(label):
-                return lambda ev: self.thumbnail_clicked(
-                    self.image_paths.index(label.image_path)
-                )
-            thumb_label.mousePressEvent = make_handler(thumb_label)
-
-            # 7. Añadir al grid de 3 columnas usando el tamaño actual de thumbnail_labels
-            idx = len(self.thumbnail_labels)
-            row, col = divmod(idx, 3)
-            self.scroll_layout.addWidget(thumb_label, row, col, Qt.AlignCenter)
-            self.thumbnail_labels.append(thumb_label)
-
-        # 8. Resaltar la miniatura activa y ajustar scroll
-        self.highlight_thumbnail()
-        self.scroll_widget.adjustSize()
-
-    
-    def highlight_thumbnail(self):
-        """Resalta la miniatura de la imagen actual"""
-        current_path = self.image_paths[self.index]
-        for thumb_label in self.thumbnail_labels:
-            if getattr(thumb_label, "image_path", None) == current_path:
-                thumb_label.setStyleSheet("border: 5px solid red;")
-            else:
-                thumb_label.setStyleSheet("")
-
     def thumbnail_clicked(self, index):
         self.index = index
         self.show_image()
 
     def update_tag_list(self):
         self.tag_list.clear()
+        if not self.image_paths: return
         current_image = self.image_paths[self.index]
         for tag in self.tag_manager.get_tags(str(current_image)):
             self.tag_list.addItem(tag)
 
     def add_tag(self):
         new_tags = self.new_tag_input.text().strip()
-        if not new_tags:
-            return
-        
+        if not new_tags or not self.image_paths: return
         current_image = self.image_paths[self.index]
-        
-        # Dividir las etiquetas por comas y limpiar espacios
-        tags = [tag.strip() for tag in new_tags.split(',')]
-        
-        # Agregar cada etiqueta individualmente
+        tags = [tag.strip() for tag in new_tags.split(',') if tag.strip()]
         for tag in tags:
-            if tag:  # Ignorar cadenas vacías
-                self.tag_manager.add_tag(str(current_image), tag)
-    
+            self.tag_manager.add_tag(str(current_image), tag)
         self.new_tag_input.clear()
         self.update_tag_list()
 
     def remove_tag(self):
         selected_items = self.tag_list.selectedItems()
-        if not selected_items:
-            return
+        if not selected_items or not self.image_paths: return
         tag_to_remove = selected_items[0].text()
         current_image = self.image_paths[self.index]
         self.tag_manager.remove_tag(str(current_image), tag_to_remove)
@@ -341,70 +363,64 @@ class ImageViewer(QMainWindow):
     def apply_filters(self):
         pos_text = self.positive_tags_input.text().strip()
         neg_text = self.negative_tags_input.text().strip()
-        positive_tags = [tag.strip() for tag in pos_text.split(",") if tag.strip()] if pos_text else []
-        negative_tags = [tag.strip() for tag in neg_text.split(",") if tag.strip()] if neg_text else []
+        positive_tags = [t.strip() for t in pos_text.split(',') if t.strip()] if pos_text else []
+        negative_tags = [t.strip() for t in neg_text.split(',') if t.strip()] if neg_text else []
+        
         filtered = self.tag_manager.filter_images(positive_tags, negative_tags)
+        
         if filtered:
             self.image_paths = [Path(p) for p in filtered]
             self.index = 0
             self.show_image()
-            self.load_thumbnails()
+            self.load_thumbnails_threaded() # Usamos la versión con hilos
         else:
             self.image_label.setText("No se encontraron imágenes con esos filtros.")
-    
+            self.image_paths = []
+            self.clear_thumbnails_layout()
+
     def resizeEvent(self, event):
-        """Reescala la imagen al redimensionar la ventana"""
+        super().resizeEvent(event)
         if self.image_paths:
             self.show_image()
-        super().resizeEvent(event)
-
 
     def external_app(self):
-        import os
-        import subprocess
-
-        if not self.image_paths:
-            return
-
+        if not self.image_paths: return
         current_image = str(self.image_paths[self.index])
-        
         try:
-            # Opción 1: Abrir la carpeta contenedora y seleccionar la imagen en Windows Explorer.
             subprocess.Popen(["explorer", "/select,", current_image])
         except Exception as e:
-            print("Error al abrir la carpeta. Abriendo la imagen en el visor por defecto:", e)
+            print(f"Error al abrir la carpeta: {e}. Intentando abrir el archivo directamente.")
             try:
-                # Opción 2: Abrir la imagen con la aplicación predeterminada de Windows.
                 os.startfile(current_image)
             except Exception as e2:
-                print("Error al abrir la imagen en el visor:", e2)
-
+                print(f"Error al abrir la imagen en el visor por defecto: {e2}")
 
     def keyPressEvent(self, event):
         if not self.image_paths:
-            return super().keyPressEvent(event)
-        
-        if event.key() == Qt.Key_Left:
-            self.index = max(0, self.index - 1)
-        elif event.key() == Qt.Key_Right:
-            self.index = min(len(self.image_paths) - 1, self.index + 1)
+            super().keyPressEvent(event)
+            return
+
+        key_actions = {
+            Qt.Key_Left: self.show_previous,
+            Qt.Key_Right: self.show_next,
+        }
+
+        if event.key() in key_actions:
+            key_actions[event.key()]()
         elif event.key() == Qt.Key_Down:
             self.index = min(len(self.image_paths) - 1, self.index + 3)
+            self.show_image()
         elif event.key() == Qt.Key_Up:
             self.index = max(0, self.index - 3)
+            self.show_image()
         else:
-            return super().keyPressEvent(event)
-        
-        self.show_image()
-        self.highlight_thumbnail()
+            super().keyPressEvent(event)
+            
+    def closeEvent(self, event):
+        # Asegurarse de que el hilo se detenga limpiamente al cerrar la ventana
+        if self.thread and self.thread.isRunning():
+            self.worker.stop()
+            self.thread.quit()
+            self.thread.wait()
+        super().closeEvent(event)
 
-
-
-
-if __name__ == "__main__":
-    from PyQt5.QtWidgets import QApplication
-    import sys
-    app = QApplication(sys.argv)
-    window = ImageViewer()
-    window.show()
-    sys.exit(app.exec_())
