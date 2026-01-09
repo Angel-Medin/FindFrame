@@ -11,61 +11,8 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QPushButton, QLabel,
 
 from image_loader import get_image_paths
 from tag_manager import TagManagerSQLite
-
-# --- NUEVA CLASE WORKER ---
-# Este objeto QObject se ejecutará en un hilo secundario para no bloquear la GUI.
-class ThumbnailWorker(QObject):
-    # Señales para comunicarse con el hilo principal de la GUI
-    thumbnail_ready = pyqtSignal(Path, QPixmap, int)  # Envía la ruta, el pixmap y el índice de la miniatura
-    finished = pyqtSignal()                         # Indica que ha terminado el proceso
-
-    def __init__(self, image_paths, parent=None):
-        super().__init__(parent)
-        self.image_paths = image_paths
-        self.is_running = True
-
-    # El método principal que se ejecutará en el hilo secundario
-    def process_thumbnails(self):
-        """
-        Procesa cada ruta de imagen, genera/carga la miniatura y emite una señal.
-        """
-        errores_log = Path.cwd() / "errores.txt"
-        
-        for index, path in enumerate(self.image_paths):
-            if not self.is_running:
-                break # Permite detener el proceso si se carga una nueva carpeta
-
-            if not path.exists():
-                with open(errores_log, "a", encoding="utf-8") as f:
-                    f.write(f"No existe: {path}\n")
-                continue
-
-            thumb_folder = path.parent / ".thumbnails"
-            thumb_folder.mkdir(parents=True, exist_ok=True)
-            thumb_path = thumb_folder / path.name
-
-            thumbnail = None
-            if thumb_path.exists():
-                thumbnail = QPixmap(str(thumb_path))
-                if thumbnail.isNull(): # Cache corrupta
-                    thumbnail = None
-
-            if thumbnail is None:
-                original_pixmap = QPixmap(str(path))
-                if original_pixmap.isNull():
-                    with open(errores_log, "a", encoding="utf-8") as f:
-                        f.write(f"No pudo cargarse: {path}\n")
-                    continue
-                thumbnail = original_pixmap.scaled(100, 100, Qt.KeepAspectRatio, Qt.FastTransformation)
-                thumbnail.save(str(thumb_path))
-            
-            # Emite la señal con los datos listos para que la GUI los use
-            self.thumbnail_ready.emit(path, thumbnail, index)
-            
-        self.finished.emit()
-
-    def stop(self):
-        self.is_running = False
+from thumbnail_service import ThumbnailWorker
+from controllers.image_controller import ImageController
 
 class ImageViewer(QMainWindow):
     def __init__(self):
@@ -76,12 +23,16 @@ class ImageViewer(QMainWindow):
         self.index = 0
         self.thumbnail_labels = []
         self.tag_manager = TagManagerSQLite()
+        self.controller = ImageController(self.tag_manager)
         
         # Atributos para el hilo de carga de miniaturas
         self.thread = None
         self.worker = None
 
         self.setup_ui()
+        self.setup_left_panel()
+        self.setup_center_panel()
+        self.setup_right_panel()
 
     def setup_ui(self):
         # ... (El resto del setup_ui es idéntico al original)
@@ -115,7 +66,7 @@ class ImageViewer(QMainWindow):
         self.content_layout = QHBoxLayout()
         self.main_layout.addLayout(self.content_layout)
 
-        # Sección izquierda: Miniaturas
+    def setup_left_panel(self):
         self.thumbnails_layout = QVBoxLayout()
         self.btn_update_folder = QPushButton("Actualizar Carpeta")
         self.thumbnails_layout.addWidget(self.btn_update_folder)
@@ -132,7 +83,7 @@ class ImageViewer(QMainWindow):
         self.thumbnails_layout.addWidget(self.scroll_area)
         self.content_layout.addLayout(self.thumbnails_layout, 1)
 
-        # Sección central: Imagen y navegación
+    def setup_center_panel(self):
         self.center_layout = QVBoxLayout()
         self.content_layout.addLayout(self.center_layout, 4)
         self.image_label = QLabel("No hay imagen cargada", alignment=Qt.AlignCenter)
@@ -155,7 +106,7 @@ class ImageViewer(QMainWindow):
         self.nav_layout.addWidget(self.btn_next)
         self.center_layout.addLayout(self.nav_layout)
 
-        # Sección derecha: etiquetas
+    def setup_right_panel(self):
         self.right_layout = QVBoxLayout()
         self.content_layout.addLayout(self.right_layout, 1)
         self.tag_title = QLabel("Etiquetas de la imagen", alignment=Qt.AlignCenter)
@@ -174,24 +125,6 @@ class ImageViewer(QMainWindow):
         self.btn_open_external = QPushButton("Abrir Ubicación")
         self.btn_open_external.clicked.connect(self.external_app)
         self.right_layout.addWidget(self.btn_open_external)
-
-    def load_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta")
-        if not folder:
-            return
-
-        self.image_paths = get_image_paths(Path(folder))
-        if not self.image_paths:
-            self.image_label.setText("No se encontraron imágenes.")
-            self.btn_next.setEnabled(False)
-            self.btn_prev.setEnabled(False)
-            return
-
-        self.tag_manager.initialize_images(self.image_paths)
-        self.index = 0
-        self.show_image()
-        # En lugar de llamar a la función que bloquea, iniciamos el hilo
-        self.load_thumbnails_threaded()
 
     def load_thumbnails_threaded(self):
         # Detener el hilo anterior si todavía está en ejecución
@@ -220,13 +153,11 @@ class ImageViewer(QMainWindow):
 
         self.worker.thumbnail_ready.connect(self.add_thumbnail)
         self.thread.start()
-
     
     def _clear_thread_references(self):
         """Slot para limpiar las referencias al hilo y al worker una vez que han terminado."""
         self.worker = None
         self.thread = None
-
 
     def add_thumbnail(self, path, pixmap, index):
         # ... (Este método no cambia)
@@ -246,7 +177,6 @@ class ImageViewer(QMainWindow):
         if self.index == index:
             self.highlight_thumbnail()
     
-
     def clear_thumbnails_layout(self):
         # ... (Este método no cambia)
         while self.scroll_layout.count():
@@ -268,40 +198,8 @@ class ImageViewer(QMainWindow):
                 thumb_label.setStyleSheet("")
 
 
-
-
-
-    def update_image_url(self):
-        folder = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta")
-        if not folder: return
-        new_paths = get_image_paths(Path(folder))
-        if not new_paths:
-            self.image_label.setText("No se encontraron imágenes a actualizar.")
-            return
-
-        for path in new_paths:
-            img_name = path.name
-            cursor = self.tag_manager.conn.cursor()
-            cursor.execute("SELECT id FROM img WHERE name = ?", (img_name,))
-            if cursor.fetchone():
-                self.tag_manager.update_image_url(img_name, str(path))
-            else:
-                self.tag_manager.initialize_images([path])
-
-        self.image_paths = new_paths
-        self.index = 0
-        try:
-            self.show_image()
-            self.load_thumbnails_threaded() # Usamos la versión con hilos
-        except Exception as e:
-            print(f"Error al actualizar la carpeta: {e}")
-            self.image_label.setText("Error al recargar vistas.")
-
-        self.btn_prev.setEnabled(self.index > 0)
-        self.btn_next.setEnabled(self.index < len(self.image_paths) - 1)
-
-
     def show_image(self):
+
         if not self.image_paths: return
         try:
             path_str = str(self.image_paths[self.index])
@@ -335,48 +233,7 @@ class ImageViewer(QMainWindow):
         self.index = index
         self.show_image()
 
-    def update_tag_list(self):
-        self.tag_list.clear()
-        if not self.image_paths: return
-        current_image = self.image_paths[self.index]
-        for tag in self.tag_manager.get_tags(str(current_image)):
-            self.tag_list.addItem(tag)
 
-    def add_tag(self):
-        new_tags = self.new_tag_input.text().strip()
-        if not new_tags or not self.image_paths: return
-        current_image = self.image_paths[self.index]
-        tags = [tag.strip() for tag in new_tags.split(',') if tag.strip()]
-        for tag in tags:
-            self.tag_manager.add_tag(str(current_image), tag)
-        self.new_tag_input.clear()
-        self.update_tag_list()
-
-    def remove_tag(self):
-        selected_items = self.tag_list.selectedItems()
-        if not selected_items or not self.image_paths: return
-        tag_to_remove = selected_items[0].text()
-        current_image = self.image_paths[self.index]
-        self.tag_manager.remove_tag(str(current_image), tag_to_remove)
-        self.update_tag_list()
-
-    def apply_filters(self):
-        pos_text = self.positive_tags_input.text().strip()
-        neg_text = self.negative_tags_input.text().strip()
-        positive_tags = [t.strip() for t in pos_text.split(',') if t.strip()] if pos_text else []
-        negative_tags = [t.strip() for t in neg_text.split(',') if t.strip()] if neg_text else []
-        
-        filtered = self.tag_manager.filter_images(positive_tags, negative_tags)
-        
-        if filtered:
-            self.image_paths = [Path(p) for p in filtered]
-            self.index = 0
-            self.show_image()
-            self.load_thumbnails_threaded() # Usamos la versión con hilos
-        else:
-            self.image_label.setText("No se encontraron imágenes con esos filtros.")
-            self.image_paths = []
-            self.clear_thumbnails_layout()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -424,3 +281,109 @@ class ImageViewer(QMainWindow):
             self.thread.wait()
         super().closeEvent(event)
 
+
+    def update_image_url(self):
+        folder = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta")
+        if not folder: return
+        new_paths = get_image_paths(Path(folder))
+        if not new_paths:
+            self.image_label.setText("No se encontraron imágenes a actualizar.")
+            return
+
+        for path in new_paths:
+            img_name = path.name
+            cursor = self.tag_manager.conn.cursor()
+            cursor.execute("SELECT id FROM img WHERE name = ?", (img_name,))
+            if cursor.fetchone():
+                self.tag_manager.update_image_url(img_name, str(path))
+            else:
+                self.tag_manager.initialize_images([path])
+
+        self.image_paths = new_paths
+        self.index = 0
+        try:
+            self.show_image()
+            self.load_thumbnails_threaded() # Usamos la versión con hilos
+        except Exception as e:
+            print(f"Error al actualizar la carpeta: {e}")
+            self.image_label.setText("Error al recargar vistas.")
+
+        self.btn_prev.setEnabled(self.index > 0)
+        self.btn_next.setEnabled(self.index < len(self.image_paths) - 1)
+
+#Refactorizado
+    def apply_filters(self):
+        pos_text = self.positive_tags_input.text().strip()
+        neg_text = self.negative_tags_input.text().strip()
+
+        positive_tags = [t.strip() for t in pos_text.split(',') if t.strip()]
+        negative_tags = [t.strip() for t in neg_text.split(',') if t.strip()]
+
+        filtered_paths = self.controller.apply_filters(
+            positive_tags,
+            negative_tags
+        )
+
+        if filtered_paths:
+            self.image_paths = filtered_paths
+            self.index = 0
+            self.show_image()
+            self.load_thumbnails_threaded()
+        else:
+            self.image_label.setText("No se encontraron imágenes con esos filtros.")
+            self.image_paths = []
+
+    def load_folder(self):          
+        folder = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta")
+        if not folder:
+            return
+
+        image_paths = self.controller.load_folder(Path(folder))
+
+        if not image_paths:
+            self.image_label.setText("No se encontraron imágenes.")
+            self.btn_next.setEnabled(False)
+            self.btn_prev.setEnabled(False)
+            return
+
+        self.image_paths = image_paths
+        self.index = 0
+        self.show_image()
+        self.load_thumbnails_threaded()
+        self.clear_thumbnails_layout()
+
+    def add_tag(self):
+        new_tags = self.new_tag_input.text().strip()
+        if not new_tags or not self.image_paths: 
+            return
+        current_image = self.image_paths[self.index]
+        tags = [tag.strip() for tag in new_tags.split(',') if tag.strip()]
+
+        self.controller.add_tags(current_image,tags)
+        
+        self.new_tag_input.clear()
+        self.update_tag_list()
+
+    def remove_tag(self):
+        selected_items = self.tag_list.selectedItems()
+        if not selected_items or not self.image_paths: 
+            return
+        tag_to_remove = selected_items[0].text()
+        current_image = self.image_paths[self.index]
+
+        self.controller.remove_tag(current_image,tag_to_remove)
+        
+        self.update_tag_list()
+
+    def update_tag_list(self):
+        self.tag_list.clear()
+
+        if not self.image_paths: 
+            return
+        
+        current_image = self.image_paths[self.index]
+
+        tags = self.controller.get_tags_for_image(current_image)
+
+        for tag in tags:
+            self.tag_list.addItem(tag)
