@@ -8,14 +8,23 @@ class NavigationModel:
 
     # --- estado básico ---
 
-    def set_images(self, images):
-        self._images = images
-        self._index = 0 if images else -1
-
+    def set_images(self, images: List[Path]):
+        """
+        Establece la lista de imágenes, filtrando automáticamente 
+        aquellas que ya no existen en el disco.
+        """
+        # Filtramos la lista antes de guardarla
+        self._images = [p for p in images if p.exists()]
+        
+        # Ajustamos el índice: 0 si hay imágenes, -1 si quedó vacía
+        if self._images:
+            self._index = 0
+        else:
+            self._index = -1
 
     def clear(self):
         self._images = []
-        self._index = 0
+        self._index = -1 # Consistente con set_images
 
     # --- consultas ---
 
@@ -28,10 +37,10 @@ class NavigationModel:
     def current_index(self) -> int:
         return self._index
 
-    def current_image(self):
-        if self._index < 0 or self._index >= len(self._images):
-            return None
-        return self._images[self._index]
+    def current_image(self) -> Optional[Path]:
+        if 0 <= self._index < len(self._images):
+            return self._images[self._index]
+        return None
 
     # --- navegación ---
 
@@ -53,9 +62,8 @@ class NavigationModel:
         if 0 <= index < len(self._images):
             self._index = index
 
-    def jump_relative(self, delta):
+    def jump_relative(self, delta: int):
         if not self._images:
             return
         new_index = max(0, min(self._index + delta, len(self._images) - 1))
         self._index = new_index
-

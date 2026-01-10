@@ -2,6 +2,7 @@ import os
 import subprocess
 from pathlib import Path
 
+from PyQt5.QtCore import QTimer
 from PyQt5.QtCore import QObject, Qt, pyqtSignal, QThread
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QPushButton, QLabel,
@@ -15,17 +16,22 @@ from thumbnail_service import ThumbnailWorker
 from controllers.image_controller import ImageController
 from services.image_service import ImageService
 from models.navigation_model import NavigationModel
+from services.image_loader_service import ImageLoaderService
 
 class ImageViewer(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Visor de Imágenes")
         self.setGeometry(100, 100, 1000, 700)
-        self.image_paths = []
-        self.index = 0
+        #self.image_paths = []
+        #self.index = 0
         self.thumbnail_labels = []
+        self._resize_timer = QTimer(self)
+        self._resize_timer.setSingleShot(True)
+        self._resize_timer.timeout.connect(self.show_image)
         self.tag_manager = TagManagerSQLite()
         self.navigation = NavigationModel()
+        self.image_loader = ImageLoaderService()
         self.image_service = ImageService(self.tag_manager)
         self.controller = ImageController(self.tag_manager,self.image_service)
 
@@ -142,7 +148,7 @@ class ImageViewer(QMainWindow):
         self.clear_thumbnails_layout()
 
         self.thread = QThread()
-        self.worker = ThumbnailWorker(self.image_paths)
+        self.worker = ThumbnailWorker(self.navigation._images)
         self.worker.moveToThread(self.thread)
 
         self.thread.started.connect(self.worker.process_thumbnails)
@@ -165,7 +171,6 @@ class ImageViewer(QMainWindow):
         self.thread = None
 
     def add_thumbnail(self, path, pixmap, index):
-        # ... (Este método no cambia)
         thumb_label = QLabel()
         thumb_label.setFixedSize(100, 100)
         thumb_label.setPixmap(pixmap)
@@ -179,7 +184,7 @@ class ImageViewer(QMainWindow):
         self.scroll_layout.addWidget(thumb_label, row, col, Qt.AlignCenter)
         self.thumbnail_labels.append(thumb_label)
         
-        if self.index == index:
+        if self.navigation.current_index() == index:
             self.highlight_thumbnail()
     
     def clear_thumbnails_layout(self):
@@ -209,17 +214,14 @@ class ImageViewer(QMainWindow):
             return
 
         try:
-            pixmap = QPixmap(str(current_image))
-            if pixmap.isNull():
-                raise ValueError(f"No se pudo cargar la imagen: {current_image}")
+            pixmap = self.image_loader.get_preview(current_image,self.image_label.size())
+            
+            if  pixmap is None:
+                raise ValueError(f"No se pudo cargar la imagen: {current_image}")   
 
-            self.image_label.setPixmap(
-                pixmap.scaled(
-                    self.image_label.size(),
-                    Qt.KeepAspectRatio,
-                    Qt.SmoothTransformation
-                )
-            )
+
+
+            self.image_label.setPixmap(pixmap)
 
             current_index = self.navigation.current_index()
             total = self.navigation.count()
@@ -234,6 +236,8 @@ class ImageViewer(QMainWindow):
             self.btn_next.setEnabled(self.navigation.can_next())
 
             self.highlight_thumbnail()
+            self._preload_neighbors()
+
 
         except Exception as e:
             print(f"Error al cargar la imagen: {e}")
@@ -257,20 +261,31 @@ class ImageViewer(QMainWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if self.image_paths:
-            self.show_image()
+        self._resize_timer.start(100)
+
+        # if self.image_paths:
+        #     self.show_image()
 
     def external_app(self):
-        if not self.image_paths: return
-        current_image = str(self.image_paths[self.index])
+        # Obtenemos la imagen actual directamente del modelo de navegación
+        current_image_path = self.navigation.current_image()
+        
+        if not current_image_path: 
+            return
+            
+        # Convertimos a string para el comando de sistema
+        path_str = str(current_image_path)
+        
         try:
-            subprocess.Popen(["explorer", "/select,", current_image])
+            # Usamos /select, para que Windows abra la carpeta y deje el archivo marcado
+            subprocess.Popen(["explorer", "/select,", path_str])
         except Exception as e:
-            print(f"Error al abrir la carpeta: {e}. Intentando abrir el archivo directamente.")
+            print(f"Error al abrir la ubicación: {e}")
+            # Intento de respaldo: abrir el archivo con la app por defecto
             try:
-                os.startfile(current_image)
+                os.startfile(path_str)
             except Exception as e2:
-                print(f"Error al abrir la imagen en el visor por defecto: {e2}")
+                print(f"Error crítico: {e2}")
 
     def keyPressEvent(self, event):
         if self.navigation.count() == 0:
@@ -320,19 +335,14 @@ class ImageViewer(QMainWindow):
             else:
                 self.tag_manager.initialize_images([path])
 
-        self.image_paths = new_paths
-        self.index = 0
+        self.navigation.set_images(new_paths)
+
         try:
             self.show_image()
             self.load_thumbnails_threaded() # Usamos la versión con hilos
         except Exception as e:
             print(f"Error al actualizar la carpeta: {e}")
             self.image_label.setText("Error al recargar vistas.")
-
-        self.btn_prev.setEnabled(self.index > 0)
-        self.btn_next.setEnabled(self.index < len(self.image_paths) - 1)
-
-#Refactorizado
 
 
     def apply_filters(self):
@@ -342,22 +352,26 @@ class ImageViewer(QMainWindow):
         positive_tags = [t.strip() for t in pos_text.split(',') if t.strip()]
         negative_tags = [t.strip() for t in neg_text.split(',') if t.strip()]
 
+        # El controlador filtra y nos da la nueva lista
         filtered_paths = self.controller.apply_filters(
             positive_tags,
             negative_tags
         )
 
+        # Actualizamos el modelo con los resultados del filtro
         self.navigation.set_images(filtered_paths)
-        self.image_paths = filtered_paths  # temporal
 
-        if self.navigation.current_image() is None:
+        if not self.navigation.has_images():
             self.image_label.setText("No se encontraron imágenes con esos filtros.")
+            self.clear_thumbnails_layout()
+            # Importante: show_image no se llama si no hay imágenes para evitar errores
+            self.btn_next.setEnabled(False)
+            self.btn_prev.setEnabled(False)
             return
 
+        # Mostramos la primera imagen del resultado filtrado
         self.show_image()
         self.load_thumbnails_threaded()
-
-
 
 
 
@@ -367,22 +381,18 @@ class ImageViewer(QMainWindow):
             return
 
         image_paths = self.controller.load_folder(Path(folder))
-
-        if not image_paths:
-            self.image_label.setText("No se encontraron imágenes.")
-            self.btn_next.setEnabled(False)
-            self.btn_prev.setEnabled(False)
-            return
-
         self.navigation.set_images(image_paths)
 
-        self.image_paths = image_paths
-    
-        self.index = 0
+        if not self.navigation.has_images():
+                self.image_label.setText("No se encontraron imágenes.")
+                # Deshabilitamos botones si la carpeta está vacía
+                self.btn_next.setEnabled(False)
+                self.btn_prev.setEnabled(False)
+                self.clear_thumbnails_layout()
+                return
 
         self.show_image()
         self.load_thumbnails_threaded()
-        self.clear_thumbnails_layout()
 
     def add_tag(self):
         new_tags = self.new_tag_input.text().strip()
@@ -423,3 +433,22 @@ class ImageViewer(QMainWindow):
 
         for tag in tags:
             self.tag_list.addItem(tag)
+
+    def _preload_neighbors(self):
+        count = self.navigation.count()
+        if count == 0:
+            return
+
+        size = self.image_label.size()
+        index = self.navigation.current_index()
+
+        # Imagen siguiente
+        if index + 1 < count:
+            next_image = self.navigation._images[index + 1]
+            self.image_loader.preload_preview(next_image, size)
+
+        # Imagen anterior
+        if index - 1 >= 0:
+            prev_image = self.navigation._images[index - 1]
+            self.image_loader.preload_preview(prev_image, size)
+
