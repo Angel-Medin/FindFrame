@@ -14,6 +14,7 @@ from tag_manager import TagManagerSQLite
 from thumbnail_service import ThumbnailWorker
 from controllers.image_controller import ImageController
 from services.image_service import ImageService
+from models.navigation_model import NavigationModel
 
 class ImageViewer(QMainWindow):
     def __init__(self):
@@ -24,8 +25,10 @@ class ImageViewer(QMainWindow):
         self.index = 0
         self.thumbnail_labels = []
         self.tag_manager = TagManagerSQLite()
+        self.navigation = NavigationModel()
         self.image_service = ImageService(self.tag_manager)
         self.controller = ImageController(self.tag_manager,self.image_service)
+
         
         # Atributos para el hilo de carga de miniaturas
         self.thread = None
@@ -188,12 +191,12 @@ class ImageViewer(QMainWindow):
         self.thumbnail_labels = []
 
     def highlight_thumbnail(self):
-        # ... (Este método no cambia)
-        if not self.image_paths:
+        current_image = self.navigation.current_image()
+        if current_image is None:
             return
-        current_path = self.image_paths[self.index]
+
         for thumb_label in self.thumbnail_labels:
-            if thumb_label.property("image_path") == current_path:
+            if thumb_label.property("image_path") == current_image:
                 thumb_label.setStyleSheet("border: 5px solid red;")
                 self.scroll_area.ensureWidgetVisible(thumb_label)
             else:
@@ -201,38 +204,53 @@ class ImageViewer(QMainWindow):
 
 
     def show_image(self):
+        current_image = self.navigation.current_image()
+        if current_image is None:
+            return
 
-        if not self.image_paths: return
         try:
-            path_str = str(self.image_paths[self.index])
-            pixmap = QPixmap(path_str)
+            pixmap = QPixmap(str(current_image))
             if pixmap.isNull():
-                raise ValueError(f"No se pudo cargar la imagen: {path_str}")
-            
+                raise ValueError(f"No se pudo cargar la imagen: {current_image}")
+
             self.image_label.setPixmap(
-                pixmap.scaled(self.image_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                pixmap.scaled(
+                    self.image_label.size(),
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation
+                )
             )
-            self.filename_label.setText(f"{self.image_paths[self.index].name} ({self.index+1}/{len(self.image_paths)})")
+
+            current_index = self.navigation.current_index()
+            total = self.navigation.count()
+
+            self.filename_label.setText(
+                f"{current_image.name} ({current_index + 1}/{total})"
+            )
+
             self.update_tag_list()
-            self.btn_prev.setEnabled(self.index > 0)
-            self.btn_next.setEnabled(self.index < len(self.image_paths) - 1)
+
+            self.btn_prev.setEnabled(self.navigation.can_previous())
+            self.btn_next.setEnabled(self.navigation.can_next())
+
             self.highlight_thumbnail()
+
         except Exception as e:
             print(f"Error al cargar la imagen: {e}")
             self.image_label.setText("No se pudo cargar la imagen.")
-            
+
+
+
     def show_next(self):
-        if self.index < len(self.image_paths) - 1:
-            self.index += 1
-            self.show_image()
+        self.navigation.next()
+        self.show_image()
 
     def show_previous(self):
-        if self.index > 0:
-            self.index -= 1
-            self.show_image()
+        self.navigation.previous()
+        self.show_image()
 
     def thumbnail_clicked(self, index):
-        self.index = index
+        self.navigation.jump_to(index)
         self.show_image()
 
 
@@ -255,26 +273,27 @@ class ImageViewer(QMainWindow):
                 print(f"Error al abrir la imagen en el visor por defecto: {e2}")
 
     def keyPressEvent(self, event):
-        if not self.image_paths:
+        if self.navigation.count() == 0:
             super().keyPressEvent(event)
             return
 
-        key_actions = {
-            Qt.Key_Left: self.show_previous,
-            Qt.Key_Right: self.show_next,
-        }
-
-        if event.key() in key_actions:
-            key_actions[event.key()]()
+        if event.key() == Qt.Key_Left:
+            self.show_previous()
+        elif event.key() == Qt.Key_Right:
+            self.show_next()
         elif event.key() == Qt.Key_Down:
-            self.index = min(len(self.image_paths) - 1, self.index + 3)
+            self.navigation.jump_relative(3)
             self.show_image()
         elif event.key() == Qt.Key_Up:
-            self.index = max(0, self.index - 3)
+            self.navigation.jump_relative(-3)
             self.show_image()
         else:
             super().keyPressEvent(event)
-            
+
+
+
+
+
     def closeEvent(self, event):
         # Asegurarse de que el hilo se detenga limpiamente al cerrar la ventana
         if self.thread and self.thread.isRunning():
@@ -314,6 +333,8 @@ class ImageViewer(QMainWindow):
         self.btn_next.setEnabled(self.index < len(self.image_paths) - 1)
 
 #Refactorizado
+
+
     def apply_filters(self):
         pos_text = self.positive_tags_input.text().strip()
         neg_text = self.negative_tags_input.text().strip()
@@ -326,14 +347,19 @@ class ImageViewer(QMainWindow):
             negative_tags
         )
 
-        if filtered_paths:
-            self.image_paths = filtered_paths
-            self.index = 0
-            self.show_image()
-            self.load_thumbnails_threaded()
-        else:
+        self.navigation.set_images(filtered_paths)
+        self.image_paths = filtered_paths  # temporal
+
+        if self.navigation.current_image() is None:
             self.image_label.setText("No se encontraron imágenes con esos filtros.")
-            self.image_paths = []
+            return
+
+        self.show_image()
+        self.load_thumbnails_threaded()
+
+
+
+
 
     def load_folder(self):          
         folder = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta")
@@ -348,17 +374,23 @@ class ImageViewer(QMainWindow):
             self.btn_prev.setEnabled(False)
             return
 
+        self.navigation.set_images(image_paths)
+
         self.image_paths = image_paths
+    
         self.index = 0
+
         self.show_image()
         self.load_thumbnails_threaded()
         self.clear_thumbnails_layout()
 
     def add_tag(self):
         new_tags = self.new_tag_input.text().strip()
-        if not new_tags or not self.image_paths: 
+         
+        if not new_tags or self.navigation.count() == 0:
             return
-        current_image = self.image_paths[self.index]
+        
+        current_image = self.navigation.current_image()
         tags = [tag.strip() for tag in new_tags.split(',') if tag.strip()]
 
         self.controller.add_tags(current_image,tags)
@@ -368,10 +400,12 @@ class ImageViewer(QMainWindow):
 
     def remove_tag(self):
         selected_items = self.tag_list.selectedItems()
-        if not selected_items or not self.image_paths: 
+        
+        if not selected_items or self.navigation.count() == 0: 
             return
+        
         tag_to_remove = selected_items[0].text()
-        current_image = self.image_paths[self.index]
+        current_image = self.navigation.current_image()
 
         self.controller.remove_tag(current_image,tag_to_remove)
         
@@ -379,11 +413,11 @@ class ImageViewer(QMainWindow):
 
     def update_tag_list(self):
         self.tag_list.clear()
+        current_image = self.navigation.current_image()
 
-        if not self.image_paths: 
+        if current_image is None:
             return
         
-        current_image = self.image_paths[self.index]
 
         tags = self.controller.get_tags_for_image(current_image)
 
