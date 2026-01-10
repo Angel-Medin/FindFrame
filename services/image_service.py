@@ -5,51 +5,61 @@ class ImageService:
     def __init__(self, tag_manager):
         self.tag_manager = tag_manager
 
-        # Cache: Path -> list[str]
-        self._tags_cache = {}
 
-        # Cache de filtros:
-        # (frozenset(positive_tags), frozenset(negative_tags)) -> list[Path]
+        self._tags_cache = {}
         self._filter_cache = {}
+        self._image_id_cache = {}
 
     def get_tags(self, image_path: Path) -> list[str]:
         """
         Devuelve los tags de una imagen.
-        Usa cache si están disponibles.
+        Usa cache de tags y de image_id.
         """
+        # 1️⃣ Cache de tags
         if image_path in self._tags_cache:
             return self._tags_cache[image_path]
 
-        # Si no está en cache, consultamos a la DB
-        tags = self.tag_manager.get_tags(str(image_path))
+        # 2️⃣ Obtener image_id usando cache
+        image_id = self._get_image_id(image_path)
+        if image_id is None:
+            return []
 
-        # Guardamos en cache
+        # 3️⃣ Consultar tags por ID
+        tags = self.tag_manager.get_tags_by_id(image_id)
+
+        # 4️⃣ Guardar en cache
         self._tags_cache[image_path] = tags
 
         return tags
 
+
     def add_tags(self, image_path: Path, tags: list[str]):
         """
-        Agrega tags a una imagen y limpia cache.
+        Agrega tags a una imagen usando image_id cacheado.
         """
+        image_id = self._get_image_id(image_path)
+        if image_id is None:
+            return
+
         for tag in tags:
-            self.tag_manager.add_tag(str(image_path), tag)
+            self.tag_manager.add_tag_by_id(image_id, tag)
 
-        # Invalida cache de esta imagen
+        # Invalida cache de tags
         self._tags_cache.pop(image_path, None)
-
-        # Los filtros pueden cambiar
-        self._filter_cache.clear()
 
     def remove_tag(self, image_path: Path, tag: str):
         """
-        Elimina un tag de una imagen y limpia cache.
+        Elimina un tag usando image_id cacheado.
         """
-        self.tag_manager.remove_tag(str(image_path), tag)
+        image_id = self._get_image_id(image_path)
+        if image_id is None:
+            return
 
-        # Invalida cache de esta imagen
+        self.tag_manager.remove_tag_by_id(image_id, tag)
+
+        # Invalida cache de tags
         self._tags_cache.pop(image_path, None)
-        self._filter_cache.clear()
+
 
     def filter_images(self, positive_tags, negative_tags) -> list[Path]:
         """
@@ -76,3 +86,22 @@ class ImageService:
         self._filter_cache[cache_key] = paths
 
         return paths
+    
+    def _get_image_id(self, image_path: Path) -> int | None:
+        """
+        Devuelve el image_id usando cache.
+        """
+        if image_path in self._image_id_cache:
+            return self._image_id_cache[image_path]
+
+        image_id = self.tag_manager.get_image_id(image_path)
+        if image_id is not None:
+            self._image_id_cache[image_path] = image_id
+
+        return image_id
+
+
+
+
+
+

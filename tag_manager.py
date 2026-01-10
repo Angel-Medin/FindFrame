@@ -247,3 +247,70 @@ class TagManagerSQLite:
     def close(self):
         """Cierra la conexión a la base de datos."""
         self.conn.close()
+
+    def get_tags_by_id(self, image_id):
+        """
+        Recupera todas las etiquetas asociadas a una imagen usando su ID.
+        Args:
+            image_id (int): ID de la imagen
+        Returns:
+            list[str]: Lista de nombres de etiquetas
+        """
+        cursor = self.conn.cursor()
+        query = """
+            SELECT t.name
+            FROM tag t
+            JOIN img_tag it ON t.id = it.tag_id
+            WHERE it.img_id = ?
+            ORDER BY t.name ASC
+        """
+        cursor.execute(query, (image_id,))
+        return [row[0] for row in cursor.fetchall()]
+
+    def add_tag_by_id(self, image_id, tag):
+        """
+        Asocia una etiqueta a una imagen usando su ID.
+        """
+        cursor = self.conn.cursor()
+
+        # Aseguramos que la etiqueta exista
+        cursor.execute("INSERT OR IGNORE INTO tag (name) VALUES (?)", (tag,))
+        self.conn.commit()
+
+        tag_id = self.get_tag_id(tag)
+        if not tag_id:
+            return
+
+        # Creamos la relación si no existe
+        cursor.execute("""
+            INSERT OR IGNORE INTO img_tag (img_id, tag_id)
+            VALUES (?, ?)
+        """, (image_id, tag_id))
+        self.conn.commit()
+
+    def remove_tag_by_id(self, image_id, tag):
+        """
+        Elimina una etiqueta de una imagen usando su ID.
+        """
+        cursor = self.conn.cursor()
+        tag_id = self.get_tag_id(tag)
+
+        if tag_id:
+            cursor.execute(
+                "DELETE FROM img_tag WHERE img_id = ? AND tag_id = ?",
+                (image_id, tag_id)
+            )
+            self.conn.commit()
+
+
+
+
+
+
+
+
+
+
+
+
+
