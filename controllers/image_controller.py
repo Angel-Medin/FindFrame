@@ -21,11 +21,8 @@ class ImageController:
     def apply_filters(self, positive_tags, negative_tags):
         """
         Devuelve una nueva lista de Path filtrados.
-        No toca UI.
-        No modifica estado visual.
         """
-        filtered = self.tag_manager.filter_images(positive_tags, negative_tags)
-        return [Path(p) for p in filtered]
+        return self.image_service.filter_images(positive_tags, negative_tags)
 
     def add_tags(self, image_path, tags):
         """
