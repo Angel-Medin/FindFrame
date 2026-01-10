@@ -2,8 +2,9 @@ from pathlib import Path
 from image_loader import get_image_paths
 
 class ImageController:
-    def __init__(self, tag_manager):
+    def __init__(self, tag_manager, image_service):
         self.tag_manager = tag_manager
+        self.image_service = image_service
 
     def load_folder(self, folder_path: Path):
         """
@@ -30,14 +31,15 @@ class ImageController:
         """
         Asocia una o varias etiquetas a una imagen.
         """
-        for tag in tags:
-            self.tag_manager.add_tag(str(image_path), tag)
+           
+        self.image_service.add_tags(image_path,tags)
     
     def remove_tag(self, image_path, tag):
-        self.tag_manager.remove_tag(str(image_path), tag)
+        self.image_service.remove_tag(image_path,tag)
+
 
     def get_tags_for_image(self, image_path):
         """
         Devuelve una lista de tags para una imagen.
         """
-        return self.tag_manager.get_tags(str(image_path))
+        return self.image_service.get_tags(image_path)

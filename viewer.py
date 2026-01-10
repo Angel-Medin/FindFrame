@@ -13,6 +13,7 @@ from image_loader import get_image_paths
 from tag_manager import TagManagerSQLite
 from thumbnail_service import ThumbnailWorker
 from controllers.image_controller import ImageController
+from services.image_service import ImageService
 
 class ImageViewer(QMainWindow):
     def __init__(self):
@@ -23,7 +24,8 @@ class ImageViewer(QMainWindow):
         self.index = 0
         self.thumbnail_labels = []
         self.tag_manager = TagManagerSQLite()
-        self.controller = ImageController(self.tag_manager)
+        self.image_service = ImageService(self.tag_manager)
+        self.controller = ImageController(self.tag_manager,self.image_service)
         
         # Atributos para el hilo de carga de miniaturas
         self.thread = None
