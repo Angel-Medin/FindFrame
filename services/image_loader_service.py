@@ -5,6 +5,10 @@ from collections import OrderedDict
 from PyQt5.QtCore import QThread
 from services.image_load_worker import ImageLoadWorker
 from PyQt5.QtCore import pyqtSignal, QObject
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 class ImageLoaderService(QObject):
     """
@@ -20,6 +24,7 @@ class ImageLoaderService(QObject):
     def __init__(self):
         super().__init__()
 
+
         # ---------- Cache ----------
         self._preview_cache: OrderedDict[tuple[Path, int, int],QPixmap] = OrderedDict()
         self._thumb_cache = OrderedDict()
@@ -27,8 +32,6 @@ class ImageLoaderService(QObject):
         self._max_cache_items = 50
         self._max_thumb_items = 200
         self._thumb_size = QSize(100, 100)
-
-
 
         # Para mapear thumbnails async
         self._pending_thumb_indexes: dict[Path, int] = {}
@@ -41,6 +44,10 @@ class ImageLoaderService(QObject):
         self._worker.finished.connect(self._on_worker_finished) 
         self._thread.start()
 
+
+        logger.info("Iniciando ImageLoaderService thread")
+        self._thread.start()
+
     # ---------- API pública ----------
 
     def get_preview(self, path: Path, target_size) -> QPixmap | None:
@@ -49,16 +56,21 @@ class ImageLoaderService(QObject):
         Ideal para imagen actualmente visible.
         """
         if target_size.width() <= 0 or target_size.height() <= 0:
+            logger.debug("get_preview llamado con tamaño inválido")        
             return None
 
         key = (path, target_size.width(), target_size.height())
 
         if key in self._preview_cache:
+            logger.debug(f"Preview cache HIT: {path.name}")    
             self._preview_cache.move_to_end(key)
             return self._preview_cache[key]
+        
+        logger.debug(f"Preview cache MISS: {path.name}")
 
         pixmap = self._load_pixmap(path)
         if pixmap is None:
+            logger.warning(f"No se pudo cargar pixmap: {path.name}")
             return None
 
         scaled = pixmap.scaled(
@@ -68,6 +80,7 @@ class ImageLoaderService(QObject):
         )
 
         self._add_to_cache(key, scaled)
+        logger.debug(f"Preview cache STORE: {path.name}")
         return scaled
 
 
@@ -112,9 +125,6 @@ class ImageLoaderService(QObject):
 
     
 
-
-    # ---------- Interno ----------
-
     def _load_pixmap(self, path: Path) -> QPixmap | None:
         if not path.exists():
             return None
@@ -154,7 +164,12 @@ class ImageLoaderService(QObject):
         self._preview_cache.move_to_end(key)
 
         if len(self._preview_cache) > self._max_cache_items:
-            self._preview_cache.popitem(last=False)
+            evicted_key, _ = self._preview_cache.popitem(last=False)
+            path, w, h = evicted_key
+            logger.debug(
+                f"LRU EVICT preview: {path.name} ({w}x{h})"
+            )
+
 
 
     def _on_worker_finished(self, path, size, pixmap):
@@ -178,20 +193,22 @@ class ImageLoaderService(QObject):
         self._thumb_cache.move_to_end(path)
 
         if len(self._thumb_cache) > self._max_thumb_items:
-            self._thumb_cache.popitem(last=False)
+            evicted_path, _ = self._thumb_cache.popitem(last=False)
+            logger.debug(
+                f"LRU EVICT thumbnail: {evicted_path.name}"
+            )
 
 
     def shutdown(self):
-        """
-        Apaga el worker y el thread de forma limpia.
-        Debe llamarse al cerrar la aplicación.
-        """
-        if self._thread.isRunning():
-            # Si el worker tiene stop(), lo llamamos
-            if hasattr(self._worker, "stop"):
-                self._worker.stop()
+        logger.info("ImageLoaderService shutdown iniciado")
 
-            self._thread.quit()
-            self._thread.wait()
+        try:
+            if self._thread.isRunning():
+                logger.debug("Deteniendo worker y thread de ImageLoaderService")
+                self._thread.quit()
+                self._thread.wait()
+                logger.debug("Thread de ImageLoaderService detenido")
+        except Exception:
+            logger.exception("Error durante shutdown de ImageLoaderService")
 
     

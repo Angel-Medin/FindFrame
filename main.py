@@ -1,11 +1,12 @@
 import sys
 from PyQt5.QtWidgets import QApplication
 from viewer import ImageViewer
+from infrastructure.logging_config import setup_logging
 
 def main():
-    app = QApplication(sys.argv)
+    setup_logging()
 
-    # Cargar el stylesheet desde el fichero externo
+    app = QApplication(sys.argv)
     try:
         with open("style.qss", "r") as file:
             app.setStyleSheet(file.read())

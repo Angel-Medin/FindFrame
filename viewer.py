@@ -17,6 +17,10 @@ from controllers.image_controller import ImageController
 from services.image_service import ImageService
 from models.navigation_model import NavigationModel
 from services.image_loader_service import ImageLoaderService
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class ImageViewer(QMainWindow):
     def __init__(self):
@@ -312,8 +316,13 @@ class ImageViewer(QMainWindow):
 
 
     def closeEvent(self, event):
-        # Apagar servicio de imágenes correctamente
-        self.image_loader.shutdown()
+        logger.info("Cerrando aplicación")
+
+        try:
+            self.image_loader.shutdown()
+        except Exception:
+            logger.exception("Error al cerrar ImageLoaderService")
+
         super().closeEvent(event)
 
 
