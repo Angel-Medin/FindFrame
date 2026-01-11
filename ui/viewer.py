@@ -10,9 +10,9 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QPushButton, QLabel,
                              QScrollArea, QFrame, QListWidget, QLineEdit,
                              QSizePolicy, QGridLayout)
 
-from image_loader import get_image_paths
-from tag_manager import TagManagerSQLite
-from thumbnail_service import ThumbnailWorker
+from infrastructure.image_loader import get_image_paths
+from infrastructure.tag_manager import TagManagerSQLite
+from services.thumbnail_service import ThumbnailWorker
 from controllers.image_controller import ImageController
 from services.image_service import ImageService
 from models.navigation_model import NavigationModel

@@ -1,5 +1,5 @@
 from pathlib import Path
-from image_loader import get_image_paths
+from infrastructure.image_loader import get_image_paths
 
 class ImageController:
     def __init__(self, tag_manager, image_service):
