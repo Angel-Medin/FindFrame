@@ -2,18 +2,29 @@ from pathlib import Path
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt
 from collections import OrderedDict
+from PyQt5.QtCore import QThread
+from services.image_load_worker import ImageLoadWorker
+from PyQt5.QtCore import pyqtSignal, QObject
 
-
-class ImageLoaderService:
-    """
-    Servicio responsable de cargar imágenes y entregarlas
-    según su uso (thumbnail, preview, full).
-    """
+class ImageLoaderService(QObject):
+    preview_ready = pyqtSignal(Path, QPixmap)
 
     def __init__(self):
+        super().__init__()
+
+
         # Cache en memoria
         self._preview_cache: OrderedDict[tuple[Path, int, int],QPixmap] = OrderedDict()
         self._max_cache_items = 50
+
+
+        self._thread = QThread()
+        self._worker = ImageLoadWorker()
+        self._worker.moveToThread(self._thread)
+        self._thread.start()
+
+        self._worker.finished.connect(self._on_worker_finished) 
+
     # ---------- API pública ----------
 
     def get_preview(self, path: Path, target_size) -> QPixmap | None:
@@ -101,3 +112,19 @@ class ImageLoaderService:
         if len(self._preview_cache) > self._max_cache_items:
             self._preview_cache.popitem(last=False)
 
+
+    def _on_worker_finished(self, path, size, pixmap):
+        key = (path, size.width(), size.height())
+        self._add_to_cache(key, pixmap)
+        self.preview_ready.emit(path, pixmap)
+
+
+    def request_preview_async(self, path: Path, target_size):
+        key = (path, target_size.width(), target_size.height())
+
+        if key in self._preview_cache:
+            self.preview_ready.emit(path, self._preview_cache[key])
+            return
+
+        self._worker.load(path, target_size)
+    

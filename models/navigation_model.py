@@ -67,3 +67,10 @@ class NavigationModel:
             return
         new_index = max(0, min(self._index + delta, len(self._images) - 1))
         self._index = new_index
+
+
+
+    def image_at(self, index):
+        if 0 <= index < len(self._images):
+            return self._images[index]
+        return None

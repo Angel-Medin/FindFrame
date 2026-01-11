@@ -35,6 +35,9 @@ class ImageViewer(QMainWindow):
         self.image_service = ImageService(self.tag_manager)
         self.controller = ImageController(self.tag_manager,self.image_service)
 
+        self.image_loader.preview_ready.connect(self._on_preview_ready)
+
+
         
         # Atributos para el hilo de carga de miniaturas
         self.thread = None
@@ -209,19 +212,15 @@ class ImageViewer(QMainWindow):
 
 
     def show_image(self):
-        current_image = self.navigation.current_image()
-        if current_image is None:
-            return
-
         try:
-            pixmap = self.image_loader.get_preview(current_image,self.image_label.size())
-            
-            if  pixmap is None:
-                raise ValueError(f"No se pudo cargar la imagen: {current_image}")   
 
 
+            current_image = self.navigation.current_image()
+            if current_image is None:
+                return
 
-            self.image_label.setPixmap(pixmap)
+            # Placeholder inmediato
+            self.image_label.setText("Cargando imagen...")
 
             current_index = self.navigation.current_index()
             total = self.navigation.count()
@@ -231,19 +230,22 @@ class ImageViewer(QMainWindow):
             )
 
             self.update_tag_list()
-
             self.btn_prev.setEnabled(self.navigation.can_previous())
             self.btn_next.setEnabled(self.navigation.can_next())
-
             self.highlight_thumbnail()
+
+            # 🔥 PEDIDO ASÍNCRONO
+            self.image_loader.request_preview_async(
+                current_image,
+                self.image_label.size()
+            )
+
+            # Preload sigue igual
             self._preload_neighbors()
 
-
         except Exception as e:
-            print(f"Error al cargar la imagen: {e}")
-            self.image_label.setText("No se pudo cargar la imagen.")
-
-
+            print(f"[ImageViewer] Error en show_image: {e}")
+            self.image_label.setText("Error al mostrar la imagen.")
 
     def show_next(self):
         self.navigation.next()
@@ -444,11 +446,20 @@ class ImageViewer(QMainWindow):
 
         # Imagen siguiente
         if index + 1 < count:
-            next_image = self.navigation._images[index + 1]
+            next_image = self.navigation.image_at(index + 1)
             self.image_loader.preload_preview(next_image, size)
 
         # Imagen anterior
         if index - 1 >= 0:
-            prev_image = self.navigation._images[index - 1]
+            prev_image = self.navigation.image_at(index - 1)
             self.image_loader.preload_preview(prev_image, size)
 
+    def _on_preview_ready(self, path, pixmap):
+        try:
+            current = self.navigation.current_image()
+            if current != path:
+                return  # llegó tarde, ignoramos
+
+            self.image_label.setPixmap(pixmap)
+        except Exception as e:
+            print(f"[ImageViewer] Error al mostrar preview: {e}")
