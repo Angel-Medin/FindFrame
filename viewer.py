@@ -312,11 +312,8 @@ class ImageViewer(QMainWindow):
 
 
     def closeEvent(self, event):
-        # Asegurarse de que el hilo se detenga limpiamente al cerrar la ventana
-        if self.thread and self.thread.isRunning():
-            self.worker.stop()
-            self.thread.quit()
-            self.thread.wait()
+        # Apagar servicio de imágenes correctamente
+        self.image_loader.shutdown()
         super().closeEvent(event)
 
 
