@@ -3,3 +3,4 @@ __pycache__/
 __pycache__
 errores.txt
 BackUP_tags.db
+app.log

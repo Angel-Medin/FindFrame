@@ -377,8 +377,7 @@ class ImageViewer(QMainWindow):
             self.btn_prev.setEnabled(False)
             return
 
-        # Mostramos la primera imagen del resultado filtrado
-        self.show_image()
+        QTimer.singleShot(0, self.show_image)
         self.load_thumbnails_threaded()
 
 

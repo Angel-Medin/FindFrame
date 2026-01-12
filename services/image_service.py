@@ -46,6 +46,7 @@ class ImageService:
 
         # Invalida cache de tags
         self._tags_cache.pop(image_path, None)
+        self._filter_cache.clear()
 
     def remove_tag(self, image_path: Path, tag: str):
         """
@@ -59,6 +60,7 @@ class ImageService:
 
         # Invalida cache de tags
         self._tags_cache.pop(image_path, None)
+        self._filter_cache.clear()
 
 
     def filter_images(self, positive_tags, negative_tags) -> list[Path]:
