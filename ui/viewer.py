@@ -457,14 +457,22 @@ class ImageViewer(QMainWindow):
             print(f"[ImageViewer] Error al mostrar preview: {e}")
 
     def add_tag(self):
-        # ... (tu código de guardado en base de datos)
+        current_image = self.navigation.current_image()
+
+        if not current_image:
+                    print("[ImageViewer] No hay ninguna imagen seleccionada para etiquetar.")
+                    return
+        
         new_tags_raw = self.new_tag_input.text().strip()
         tags_to_add = [t.strip() for t in new_tags_raw.split(',') if t.strip()]
+
+        if not tags_to_add:
+            return
+        
         self.controller.add_tags(current_image, tags_to_add)
 
         # 🔥 ESTA LÍNEA ES LA QUE ACTUALIZA EL AUTOCOMPLETADO AL INSTANTE
         self.tag_model.setStringList(self.image_service.get_all_tags())
-
         self.new_tag_input.clear()
         self.update_tag_list()
 
