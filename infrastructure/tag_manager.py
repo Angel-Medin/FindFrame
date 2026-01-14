@@ -302,6 +302,13 @@ class TagManagerSQLite:
             )
             self.conn.commit()
 
+    def get_all_tags(self) -> list[str]:
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT name FROM tag ORDER BY name ASC")
+        return [row[0] for row in cursor.fetchall()]
+
+
+
 
 
 

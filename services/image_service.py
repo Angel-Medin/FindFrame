@@ -32,7 +32,6 @@ class ImageService:
 
         return tags
 
-
     def add_tags(self, image_path: Path, tags: list[str]):
         """
         Agrega tags a una imagen usando image_id cacheado.
@@ -61,7 +60,6 @@ class ImageService:
         # Invalida cache de tags
         self._tags_cache.pop(image_path, None)
         self._filter_cache.clear()
-
 
     def filter_images(self, positive_tags, negative_tags) -> list[Path]:
         """
@@ -102,6 +100,8 @@ class ImageService:
 
         return image_id
 
+    def get_all_tags(self) -> list[str]:
+        return self.tag_manager.get_all_tags()
 
 
 

@@ -3,12 +3,12 @@ import subprocess
 from pathlib import Path
 
 from PyQt5.QtCore import QTimer
-from PyQt5.QtCore import QObject, Qt, pyqtSignal, QThread
+from PyQt5.QtCore import QObject, Qt, pyqtSignal, QThread, QStringListModel
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QPushButton, QLabel,
                              QFileDialog, QVBoxLayout, QWidget, QHBoxLayout,
                              QScrollArea, QFrame, QListWidget, QLineEdit,
-                             QSizePolicy, QGridLayout)
+                             QSizePolicy, QGridLayout, QCompleter)
 
 from infrastructure.image_loader import get_image_paths
 from infrastructure.tag_manager import TagManagerSQLite
@@ -70,9 +70,11 @@ class ImageViewer(QMainWindow):
         # Filtros
         self.filter_layout = QHBoxLayout()
         self.positive_tags_input = QLineEdit()
+        self.setup_tag_autocomplete(self.positive_tags_input)
         self.positive_tags_input.setPlaceholderText("Etiquetas positivas (separadas por comas)")
         self.filter_layout.addWidget(self.positive_tags_input)
         self.negative_tags_input = QLineEdit()
+        self.setup_tag_autocomplete(self.negative_tags_input)
         self.negative_tags_input.setPlaceholderText("Etiquetas negativas (separadas por comas)")
         self.filter_layout.addWidget(self.negative_tags_input)
         self.btn_apply_filters = QPushButton("Aplicar Filtros")
@@ -132,6 +134,7 @@ class ImageViewer(QMainWindow):
         self.tag_list = QListWidget()
         self.right_layout.addWidget(self.tag_list)
         self.new_tag_input = QLineEdit()
+        self.setup_tag_autocomplete(self.new_tag_input)
         self.new_tag_input.setPlaceholderText("Nueva etiqueta")
         self.right_layout.addWidget(self.new_tag_input)
         self.btn_add_tag = QPushButton("Agregar Etiqueta")
@@ -214,7 +217,6 @@ class ImageViewer(QMainWindow):
             else:
                 thumb_label.setStyleSheet("")
 
-
     def show_image(self):
         try:
 
@@ -263,8 +265,6 @@ class ImageViewer(QMainWindow):
         self.navigation.jump_to(index)
         self.show_image()
 
-
-
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._resize_timer.start(100)
@@ -311,10 +311,6 @@ class ImageViewer(QMainWindow):
         else:
             super().keyPressEvent(event)
 
-
-
-
-
     def closeEvent(self, event):
         logger.info("Cerrando aplicación")
 
@@ -324,7 +320,6 @@ class ImageViewer(QMainWindow):
             logger.exception("Error al cerrar ImageLoaderService")
 
         super().closeEvent(event)
-
 
     def update_image_url(self):
         folder = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta")
@@ -352,7 +347,6 @@ class ImageViewer(QMainWindow):
             print(f"Error al actualizar la carpeta: {e}")
             self.image_label.setText("Error al recargar vistas.")
 
-
     def apply_filters(self):
         pos_text = self.positive_tags_input.text().strip()
         neg_text = self.negative_tags_input.text().strip()
@@ -379,8 +373,6 @@ class ImageViewer(QMainWindow):
 
         QTimer.singleShot(0, self.show_image)
         self.load_thumbnails_threaded()
-
-
 
     def load_folder(self):          
         folder = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta")
@@ -468,3 +460,23 @@ class ImageViewer(QMainWindow):
             self.image_label.setPixmap(pixmap)
         except Exception as e:
             print(f"[ImageViewer] Error al mostrar preview: {e}")
+
+    def setup_tag_autocomplete(self, line_edit: QLineEdit):
+        completer = QCompleter(self.image_service.get_all_tags(), self)
+        completer.setCaseSensitivity(Qt.CaseInsensitive)
+        completer.setFilterMode(Qt.MatchContains)
+
+        def split_path(text):
+            return [t.strip() for t in text.split(",")]
+
+        def join_path(parts):
+            return ", ".join(parts)
+
+        completer.splitPath = split_path
+        completer.pathFromIndex = lambda index: join_path(
+            split_path(line_edit.text())[:-1] + [index.data()]
+        )
+
+        line_edit.setCompleter(completer)
+
+
