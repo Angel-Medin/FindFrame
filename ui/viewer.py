@@ -1,52 +1,65 @@
+
 import os
 import subprocess
 from pathlib import Path
 
 from PyQt5.QtCore import QTimer
-from PyQt5.QtCore import QObject, Qt, pyqtSignal, QThread
+from PyQt5.QtCore import QObject, Qt, pyqtSignal, QThread, QStringListModel
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QPushButton, QLabel,
                              QFileDialog, QVBoxLayout, QWidget, QHBoxLayout,
                              QScrollArea, QFrame, QListWidget, QLineEdit,
-                             QSizePolicy, QGridLayout)
+                             QSizePolicy, QGridLayout, QCompleter)
 
-from image_loader import get_image_paths
-from tag_manager import TagManagerSQLite
-from thumbnail_service import ThumbnailWorker
+from infrastructure.image_loader import get_image_paths
+from infrastructure.tag_manager import TagManagerSQLite
+from services.thumbnail_service import ThumbnailWorker
 from controllers.image_controller import ImageController
 from services.image_service import ImageService
 from models.navigation_model import NavigationModel
 from services.image_loader_service import ImageLoaderService
+import logging
+from ui.components.completers import MultiTagCompleter
+
+logger = logging.getLogger(__name__)
 
 class ImageViewer(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Visor de Imágenes")
         self.setGeometry(100, 100, 1000, 700)
-        #self.image_paths = []
-        #self.index = 0
-        self.thumbnail_labels = []
-        self._resize_timer = QTimer(self)
-        self._resize_timer.setSingleShot(True)
-        self._resize_timer.timeout.connect(self.show_image)
+        # 1. Inicializar servicios y modelos de DATOS primero
         self.tag_manager = TagManagerSQLite()
         self.navigation = NavigationModel()
         self.image_loader = ImageLoaderService()
         self.image_service = ImageService(self.tag_manager)
+
+        # 2. Crear el MODELO antes de la UI
+        self.tag_model = QStringListModel(self.image_service.get_all_tags())
         self.controller = ImageController(self.tag_manager,self.image_service)
 
-        self.image_loader.preview_ready.connect(self._on_preview_ready)
-
-
-        
-        # Atributos para el hilo de carga de miniaturas
-        self.thread = None
-        self.worker = None
-
+        # 3. Construir la UI
         self.setup_ui()
         self.setup_left_panel()
         self.setup_center_panel()
         self.setup_right_panel()
+
+        self.thread = None
+        self.worker = None
+
+
+        self._resize_timer = QTimer(self)
+        self._resize_timer.setSingleShot(True)
+        self._resize_timer.timeout.connect(self.show_image)
+        self.image_loader.preview_ready.connect(self._on_preview_ready)
+
+
+
+        self.thumbnail_labels = []
+        self.image_service.get_all_tags()
+       
+
+
 
     def setup_ui(self):
         # ... (El resto del setup_ui es idéntico al original)
@@ -66,9 +79,11 @@ class ImageViewer(QMainWindow):
         # Filtros
         self.filter_layout = QHBoxLayout()
         self.positive_tags_input = QLineEdit()
+        self.setup_tag_autocomplete(self.positive_tags_input)
         self.positive_tags_input.setPlaceholderText("Etiquetas positivas (separadas por comas)")
         self.filter_layout.addWidget(self.positive_tags_input)
         self.negative_tags_input = QLineEdit()
+        self.setup_tag_autocomplete(self.negative_tags_input)
         self.negative_tags_input.setPlaceholderText("Etiquetas negativas (separadas por comas)")
         self.filter_layout.addWidget(self.negative_tags_input)
         self.btn_apply_filters = QPushButton("Aplicar Filtros")
@@ -128,6 +143,7 @@ class ImageViewer(QMainWindow):
         self.tag_list = QListWidget()
         self.right_layout.addWidget(self.tag_list)
         self.new_tag_input = QLineEdit()
+        self.setup_tag_autocomplete(self.new_tag_input)
         self.new_tag_input.setPlaceholderText("Nueva etiqueta")
         self.right_layout.addWidget(self.new_tag_input)
         self.btn_add_tag = QPushButton("Agregar Etiqueta")
@@ -210,7 +226,6 @@ class ImageViewer(QMainWindow):
             else:
                 thumb_label.setStyleSheet("")
 
-
     def show_image(self):
         try:
 
@@ -259,8 +274,6 @@ class ImageViewer(QMainWindow):
         self.navigation.jump_to(index)
         self.show_image()
 
-
-
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._resize_timer.start(100)
@@ -307,15 +320,15 @@ class ImageViewer(QMainWindow):
         else:
             super().keyPressEvent(event)
 
-
-
-
-
     def closeEvent(self, event):
-        # Apagar servicio de imágenes correctamente
-        self.image_loader.shutdown()
-        super().closeEvent(event)
+        logger.info("Cerrando aplicación")
 
+        try:
+            self.image_loader.shutdown()
+        except Exception:
+            logger.exception("Error al cerrar ImageLoaderService")
+
+        super().closeEvent(event)
 
     def update_image_url(self):
         folder = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta")
@@ -343,7 +356,6 @@ class ImageViewer(QMainWindow):
             print(f"Error al actualizar la carpeta: {e}")
             self.image_label.setText("Error al recargar vistas.")
 
-
     def apply_filters(self):
         pos_text = self.positive_tags_input.text().strip()
         neg_text = self.negative_tags_input.text().strip()
@@ -368,11 +380,8 @@ class ImageViewer(QMainWindow):
             self.btn_prev.setEnabled(False)
             return
 
-        # Mostramos la primera imagen del resultado filtrado
-        self.show_image()
+        QTimer.singleShot(0, self.show_image)
         self.load_thumbnails_threaded()
-
-
 
     def load_folder(self):          
         folder = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta")
@@ -392,20 +401,6 @@ class ImageViewer(QMainWindow):
 
         self.show_image()
         self.load_thumbnails_threaded()
-
-    def add_tag(self):
-        new_tags = self.new_tag_input.text().strip()
-         
-        if not new_tags or self.navigation.count() == 0:
-            return
-        
-        current_image = self.navigation.current_image()
-        tags = [tag.strip() for tag in new_tags.split(',') if tag.strip()]
-
-        self.controller.add_tags(current_image,tags)
-        
-        self.new_tag_input.clear()
-        self.update_tag_list()
 
     def remove_tag(self):
         selected_items = self.tag_list.selectedItems()
@@ -460,3 +455,35 @@ class ImageViewer(QMainWindow):
             self.image_label.setPixmap(pixmap)
         except Exception as e:
             print(f"[ImageViewer] Error al mostrar preview: {e}")
+
+    def add_tag(self):
+        current_image = self.navigation.current_image()
+
+        if not current_image:
+                    print("[ImageViewer] No hay ninguna imagen seleccionada para etiquetar.")
+                    return
+        
+        new_tags_raw = self.new_tag_input.text().strip()
+        tags_to_add = [t.strip() for t in new_tags_raw.split(',') if t.strip()]
+
+        if not tags_to_add:
+            return
+        
+        self.controller.add_tags(current_image, tags_to_add)
+
+        # 🔥 ESTA LÍNEA ES LA QUE ACTUALIZA EL AUTOCOMPLETADO AL INSTANTE
+        self.tag_model.setStringList(self.image_service.get_all_tags())
+        self.new_tag_input.clear()
+        self.update_tag_list()
+
+    def setup_tag_autocomplete(self, line_edit: QLineEdit):
+        completer = MultiTagCompleter(self.tag_model, self)
+        completer.setCaseSensitivity(Qt.CaseInsensitive)
+        completer.setFilterMode(Qt.MatchContains)
+        completer.setCompletionMode(QCompleter.PopupCompletion)
+        line_edit.setCompleter(completer)
+
+
+
+
+

@@ -32,7 +32,6 @@ class ImageService:
 
         return tags
 
-
     def add_tags(self, image_path: Path, tags: list[str]):
         """
         Agrega tags a una imagen usando image_id cacheado.
@@ -46,6 +45,7 @@ class ImageService:
 
         # Invalida cache de tags
         self._tags_cache.pop(image_path, None)
+        self._filter_cache.clear()
 
     def remove_tag(self, image_path: Path, tag: str):
         """
@@ -59,31 +59,26 @@ class ImageService:
 
         # Invalida cache de tags
         self._tags_cache.pop(image_path, None)
-
+        self._filter_cache.clear()
 
     def filter_images(self, positive_tags, negative_tags) -> list[Path]:
         """
         Filtra imágenes usando tags positivos y negativos.
         Usa cache si es posible.
         """
-        # Normalizamos tags (por seguridad)
         pos = frozenset(t.strip() for t in positive_tags if t.strip())
         neg = frozenset(t.strip() for t in negative_tags if t.strip())
 
         cache_key = (pos, neg)
 
-        # ¿Está en cache?
         if cache_key in self._filter_cache:
             return self._filter_cache[cache_key]
-
-        # No está: preguntamos a la DB
+        
+        
         filtered = self.tag_manager.filter_images(list(pos), list(neg))
-
-        # Convertimos a Path
-        paths = [Path(p) for p in filtered]
-
-        # Guardamos en cache
+        paths = [Path(p) for p in filtered if Path(p).exists()]
         self._filter_cache[cache_key] = paths
+        
 
         return paths
     
@@ -100,6 +95,8 @@ class ImageService:
 
         return image_id
 
+    def get_all_tags(self) -> list[str]:
+        return self.tag_manager.get_all_tags()
 
 
 

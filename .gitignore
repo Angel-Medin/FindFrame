@@ -3,5 +3,5 @@ __pycache__/
 __pycache__
 errores.txt
 BackUP_tags.db
-errores.txt
 app.log
+contexto_llm.txt
