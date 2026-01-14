@@ -66,24 +66,19 @@ class ImageService:
         Filtra imágenes usando tags positivos y negativos.
         Usa cache si es posible.
         """
-        # Normalizamos tags (por seguridad)
         pos = frozenset(t.strip() for t in positive_tags if t.strip())
         neg = frozenset(t.strip() for t in negative_tags if t.strip())
 
         cache_key = (pos, neg)
 
-        # ¿Está en cache?
         if cache_key in self._filter_cache:
             return self._filter_cache[cache_key]
-
-        # No está: preguntamos a la DB
+        
+        
         filtered = self.tag_manager.filter_images(list(pos), list(neg))
-
-        # Convertimos a Path
-        paths = [Path(p) for p in filtered]
-
-        # Guardamos en cache
+        paths = [Path(p) for p in filtered if Path(p).exists()]
         self._filter_cache[cache_key] = paths
+        
 
         return paths
     
