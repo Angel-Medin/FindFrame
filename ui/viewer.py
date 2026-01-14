@@ -1,3 +1,4 @@
+
 import os
 import subprocess
 from pathlib import Path
@@ -18,39 +19,47 @@ from services.image_service import ImageService
 from models.navigation_model import NavigationModel
 from services.image_loader_service import ImageLoaderService
 import logging
+from ui.components.completers import MultiTagCompleter
 
 logger = logging.getLogger(__name__)
-
 
 class ImageViewer(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Visor de Imágenes")
         self.setGeometry(100, 100, 1000, 700)
-        #self.image_paths = []
-        #self.index = 0
-        self.thumbnail_labels = []
-        self._resize_timer = QTimer(self)
-        self._resize_timer.setSingleShot(True)
-        self._resize_timer.timeout.connect(self.show_image)
+        # 1. Inicializar servicios y modelos de DATOS primero
         self.tag_manager = TagManagerSQLite()
         self.navigation = NavigationModel()
         self.image_loader = ImageLoaderService()
         self.image_service = ImageService(self.tag_manager)
+
+        # 2. Crear el MODELO antes de la UI
+        self.tag_model = QStringListModel(self.image_service.get_all_tags())
         self.controller = ImageController(self.tag_manager,self.image_service)
 
-        self.image_loader.preview_ready.connect(self._on_preview_ready)
-
-
-        
-        # Atributos para el hilo de carga de miniaturas
-        self.thread = None
-        self.worker = None
-
+        # 3. Construir la UI
         self.setup_ui()
         self.setup_left_panel()
         self.setup_center_panel()
         self.setup_right_panel()
+
+        self.thread = None
+        self.worker = None
+
+
+        self._resize_timer = QTimer(self)
+        self._resize_timer.setSingleShot(True)
+        self._resize_timer.timeout.connect(self.show_image)
+        self.image_loader.preview_ready.connect(self._on_preview_ready)
+
+
+
+        self.thumbnail_labels = []
+        self.image_service.get_all_tags()
+       
+
+
 
     def setup_ui(self):
         # ... (El resto del setup_ui es idéntico al original)
@@ -393,20 +402,6 @@ class ImageViewer(QMainWindow):
         self.show_image()
         self.load_thumbnails_threaded()
 
-    def add_tag(self):
-        new_tags = self.new_tag_input.text().strip()
-         
-        if not new_tags or self.navigation.count() == 0:
-            return
-        
-        current_image = self.navigation.current_image()
-        tags = [tag.strip() for tag in new_tags.split(',') if tag.strip()]
-
-        self.controller.add_tags(current_image,tags)
-        
-        self.new_tag_input.clear()
-        self.update_tag_list()
-
     def remove_tag(self):
         selected_items = self.tag_list.selectedItems()
         
@@ -461,22 +456,26 @@ class ImageViewer(QMainWindow):
         except Exception as e:
             print(f"[ImageViewer] Error al mostrar preview: {e}")
 
+    def add_tag(self):
+        # ... (tu código de guardado en base de datos)
+        new_tags_raw = self.new_tag_input.text().strip()
+        tags_to_add = [t.strip() for t in new_tags_raw.split(',') if t.strip()]
+        self.controller.add_tags(current_image, tags_to_add)
+
+        # 🔥 ESTA LÍNEA ES LA QUE ACTUALIZA EL AUTOCOMPLETADO AL INSTANTE
+        self.tag_model.setStringList(self.image_service.get_all_tags())
+
+        self.new_tag_input.clear()
+        self.update_tag_list()
+
     def setup_tag_autocomplete(self, line_edit: QLineEdit):
-        completer = QCompleter(self.image_service.get_all_tags(), self)
+        completer = MultiTagCompleter(self.tag_model, self)
         completer.setCaseSensitivity(Qt.CaseInsensitive)
         completer.setFilterMode(Qt.MatchContains)
-
-        def split_path(text):
-            return [t.strip() for t in text.split(",")]
-
-        def join_path(parts):
-            return ", ".join(parts)
-
-        completer.splitPath = split_path
-        completer.pathFromIndex = lambda index: join_path(
-            split_path(line_edit.text())[:-1] + [index.data()]
-        )
-
+        completer.setCompletionMode(QCompleter.PopupCompletion)
         line_edit.setCompleter(completer)
+
+
+
 
 
