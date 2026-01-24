@@ -70,6 +70,18 @@ class ImageViewer(QMainWindow):
         self.toolbar = Toolbar()
         self.toolbar.load_folder_requested.connect(self.load_folder)
         self.toolbar.update_folder_requested.connect(self.update_image_url)
+            
+        # Conexiones para guías y grilla
+        self.toolbar.toggle_guides_requested.connect(self._on_toggle_guides)
+        self.toolbar.lock_guides_requested.connect(self._on_lock_guides)
+        self.toolbar.guide_mode_changed.connect(self._on_guide_mode_changed)
+        self.toolbar.clear_guides_requested.connect(self._on_clear_guides)
+        self.toolbar.toggle_grid_requested.connect(self._on_toggle_grid)
+        self.toolbar.grid_spacing_changed.connect(self._on_grid_spacing_changed)
+        self.toolbar.grid_color_changed.connect(self._on_grid_color_changed)
+                
+            
+        
         self.main_layout.addWidget(self.toolbar)
 
         # Filtros debajo de la barra de tareas
@@ -118,11 +130,6 @@ class ImageViewer(QMainWindow):
         """Delega la carga de thumbnails al panel de miniaturas."""
         self.thumbnail_panel.load_thumbnails_threaded(self.navigation._images)
     
-
-
-
-    
-
     def highlight_thumbnail(self):
         """Delega el resaltado de thumbnail al panel de miniaturas."""
         current_image = self.navigation.current_image()
@@ -371,6 +378,34 @@ class ImageViewer(QMainWindow):
         completer.setCompletionMode(QCompleter.PopupCompletion)
         line_edit.setCompleter(completer)
 
+
+    def _on_toggle_guides(self, enabled):
+        """Activa/desactiva el modo de guías en el visor."""
+        self.viewer_panel.image_label.toggle_guides(enabled)
+
+    def _on_lock_guides(self, locked):
+        """Bloquea/desbloquea las guías."""
+        self.viewer_panel.image_label.lock_guides(locked)
+
+    def _on_guide_mode_changed(self, mode):
+        """Cambia el modo de guía (vertical/horizontal)."""
+        self.viewer_panel.image_label.set_guide_mode(mode)
+
+    def _on_clear_guides(self):
+        """Limpia todas las guías del visor."""
+        self.viewer_panel.image_label.clear_guides()
+
+    def _on_toggle_grid(self, enabled):
+        """Activa/desactiva la grilla en el visor."""
+        self.viewer_panel.image_label.toggle_grid(enabled)
+
+    def _on_grid_spacing_changed(self, spacing):
+        """Cambia el espaciado de la grilla."""
+        self.viewer_panel.image_label.set_grid_spacing(spacing)
+
+    def _on_grid_color_changed(self, color):
+        """Cambia el color de la grilla."""
+        self.viewer_panel.image_label.set_grid_color(color)
 
 
 
