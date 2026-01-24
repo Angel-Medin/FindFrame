@@ -1,8 +1,10 @@
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QScrollArea
 from PyQt5.QtGui import QPixmap
 from pathlib import Path
 
+
+from ui.components.zoomable_image_label import ZoomableImageLabel
 
 class ImageViewerPanel(QWidget):
     """Panel central con el visor de imagen y controles de navegación."""
@@ -20,12 +22,19 @@ class ImageViewerPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         
-        # Label principal para mostrar la imagen
-        self.image_label = QLabel("No hay imagen cargada", alignment=Qt.AlignCenter)
+        # Área de scroll para la imagen con zoom
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(False) # Importante para permitir que el label crezca
+        self.scroll_area.setAlignment(Qt.AlignCenter)
+        self.scroll_area.setStyleSheet("background-color: #f0f0f0;") # Fondo gris claro
+        
+        # Label principal para mostrar la imagen (ahora Zoomable)
+        self.image_label = ZoomableImageLabel()
         self.image_label.setStyleSheet("border: 1px solid black;")
-        self.image_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         self.image_label.setMinimumSize(100, 100)
-        layout.addWidget(self.image_label)
+        
+        self.scroll_area.setWidget(self.image_label)
+        layout.addWidget(self.scroll_area)
         
         # Label para el nombre del archivo
         self.filename_label = QLabel("", alignment=Qt.AlignCenter)
@@ -74,5 +83,8 @@ class ImageViewerPanel(QWidget):
         self.btn_next.setEnabled(can_next)
     
     def get_image_label_size(self):
-        """Retorna el tamaño del label de imagen."""
-        return self.image_label.size()
+        """Retorna el tamaño disponible en el viewport para la carga asíncrona."""
+        # Solicitamos una imagen del tamaño del área visible, no del label (que puede ser pequeño)
+        if self.scroll_area.viewport().size().isEmpty():
+             return self.size() # Fallback si el área no está lista
+        return self.scroll_area.viewport().size()
