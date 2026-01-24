@@ -5,3 +5,4 @@ errores.txt
 BackUP_tags.db
 app.log
 contexto_llm.txt
+backup/
