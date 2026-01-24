@@ -1,4 +1,5 @@
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from services.image_service import ImageService
@@ -15,11 +16,18 @@ class TestImageService(unittest.TestCase):
         self.img2 = Path("b.jpg")
         self.img3 = Path("c.jpg")
 
+        # Mock Path.exists to return True
+        self.patcher = unittest.mock.patch('pathlib.Path.exists', return_value=True)
+        self.patcher.start()
+
         self.tag_manager.initialize_images([self.img1, self.img2, self.img3])
 
         self.tag_manager.set_tags(self.img1, ["cat", "cute"])
         self.tag_manager.set_tags(self.img2, ["dog"])
         self.tag_manager.set_tags(self.img3, ["cat", "wild"])
+
+    def tearDown(self):
+        self.patcher.stop()
 
 
     def test_no_filters_returns_all_images(self):

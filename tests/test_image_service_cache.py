@@ -1,4 +1,5 @@
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from services.image_service import ImageService
@@ -17,10 +18,17 @@ class TestImageServiceFilterCache(unittest.TestCase):
             Path("c.jpg"),
         ]
 
+        # Mock Path.exists to return True
+        self.patcher = unittest.mock.patch('pathlib.Path.exists', return_value=True)
+        self.patcher.start()
+
         self.tag_manager.initialize_images(self.images)
         self.tag_manager.set_tags(self.images[0], ["cat"])
         self.tag_manager.set_tags(self.images[1], ["dog"])
         self.tag_manager.set_tags(self.images[2], [])
+
+    def tearDown(self):
+        self.patcher.stop()
 
     def test_filter_cache_hit(self):
         # Primera llamada → MISS

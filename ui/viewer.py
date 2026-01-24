@@ -20,6 +20,11 @@ from models.navigation_model import NavigationModel
 from services.image_loader_service import ImageLoaderService
 import logging
 from ui.components.completers import MultiTagCompleter
+from ui.components.toolbar import Toolbar
+from ui.components.thumbnail_panel import ThumbnailPanel
+from ui.components.image_viewer_panel import ImageViewerPanel
+from ui.components.image_tags_panel import ImageTagsPanel
+
 
 logger = logging.getLogger(__name__)
 
@@ -44,10 +49,6 @@ class ImageViewer(QMainWindow):
         self.setup_center_panel()
         self.setup_right_panel()
 
-        self.thread = None
-        self.worker = None
-
-
         self._resize_timer = QTimer(self)
         self._resize_timer.setSingleShot(True)
         self._resize_timer.timeout.connect(self.show_image)
@@ -55,14 +56,8 @@ class ImageViewer(QMainWindow):
 
 
 
-        self.thumbnail_labels = []
-        self.image_service.get_all_tags()
-       
-
-
 
     def setup_ui(self):
-        # ... (El resto del setup_ui es idéntico al original)
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         self.main_layout = QVBoxLayout(self.central_widget)
@@ -71,188 +66,95 @@ class ImageViewer(QMainWindow):
         self.central_widget.setFocusPolicy(Qt.StrongFocus)
         self.central_widget.setFocus()
 
-        # Botón para cargar carpeta
-        self.btn_load = QPushButton("Cargar Carpeta")
-        self.btn_load.clicked.connect(self.load_folder)
-        self.main_layout.addWidget(self.btn_load)
+        # Barra de tareas superior (solo botones)
+        self.toolbar = Toolbar()
+        self.toolbar.load_folder_requested.connect(self.load_folder)
+        self.toolbar.update_folder_requested.connect(self.update_image_url)
+        self.main_layout.addWidget(self.toolbar)
 
-        # Filtros
+        # Filtros debajo de la barra de tareas
         self.filter_layout = QHBoxLayout()
         self.positive_tags_input = QLineEdit()
         self.setup_tag_autocomplete(self.positive_tags_input)
         self.positive_tags_input.setPlaceholderText("Etiquetas positivas (separadas por comas)")
         self.filter_layout.addWidget(self.positive_tags_input)
+        
         self.negative_tags_input = QLineEdit()
         self.setup_tag_autocomplete(self.negative_tags_input)
         self.negative_tags_input.setPlaceholderText("Etiquetas negativas (separadas por comas)")
         self.filter_layout.addWidget(self.negative_tags_input)
+        
         self.btn_apply_filters = QPushButton("Aplicar Filtros")
-        self.btn_apply_filters.clicked.connect(self.apply_filters)
+        self.btn_apply_filters.clicked.connect(self._on_apply_filters)
         self.filter_layout.addWidget(self.btn_apply_filters)
         self.main_layout.addLayout(self.filter_layout)
 
-        # Layout principal
+        # Layout principal para los paneles
         self.content_layout = QHBoxLayout()
         self.main_layout.addLayout(self.content_layout)
 
     def setup_left_panel(self):
-        self.thumbnails_layout = QVBoxLayout()
-        self.btn_update_folder = QPushButton("Actualizar Carpeta")
-        self.thumbnails_layout.addWidget(self.btn_update_folder)
-        self.btn_update_folder.clicked.connect(self.update_image_url)
-        self.scroll_area = QScrollArea()
-        self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setFixedWidth(320)
-        self.scroll_area.setFocusPolicy(Qt.NoFocus)
-        self.scroll_widget = QWidget()
-        self.scroll_layout = QGridLayout(self.scroll_widget) # QGridLayout
-        self.scroll_layout.setContentsMargins(0, 0, 0, 0)
-        self.scroll_layout.setSpacing(2)
-        self.scroll_area.setWidget(self.scroll_widget)
-        self.thumbnails_layout.addWidget(self.scroll_area)
-        self.content_layout.addLayout(self.thumbnails_layout, 1)
+        # Panel de miniaturas
+        self.thumbnail_panel = ThumbnailPanel()
+        self.thumbnail_panel.thumbnail_clicked.connect(self.thumbnail_clicked)
+        self.content_layout.addWidget(self.thumbnail_panel, 1)
 
     def setup_center_panel(self):
-        self.center_layout = QVBoxLayout()
-        self.content_layout.addLayout(self.center_layout, 4)
-        self.image_label = QLabel("No hay imagen cargada", alignment=Qt.AlignCenter)
-        self.image_label.setStyleSheet("border: 1px solid black;")
-        self.image_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
-        self.image_label.setMinimumSize(100, 100)
-        self.center_layout.addWidget(self.image_label)
-        self.filename_label = QLabel("", alignment=Qt.AlignCenter)
-        self.filename_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        self.filename_label.setMaximumHeight(40)
-        self.center_layout.addWidget(self.filename_label)
-        self.nav_layout = QHBoxLayout()
-        self.btn_prev = QPushButton("◀ Anterior")
-        self.btn_prev.clicked.connect(self.show_previous)
-        self.btn_prev.setEnabled(False)
-        self.nav_layout.addWidget(self.btn_prev)
-        self.btn_next = QPushButton("Siguiente ▶")
-        self.btn_next.clicked.connect(self.show_next)
-        self.btn_next.setEnabled(False)
-        self.nav_layout.addWidget(self.btn_next)
-        self.center_layout.addLayout(self.nav_layout)
+        # Panel central del visor
+        self.viewer_panel = ImageViewerPanel()
+        self.viewer_panel.next_requested.connect(self.show_next)
+        self.viewer_panel.previous_requested.connect(self.show_previous)
+        self.content_layout.addWidget(self.viewer_panel, 4)
 
     def setup_right_panel(self):
-        self.right_layout = QVBoxLayout()
-        self.content_layout.addLayout(self.right_layout, 1)
-        self.tag_title = QLabel("Etiquetas de la imagen", alignment=Qt.AlignCenter)
-        self.right_layout.addWidget(self.tag_title)
-        self.tag_list = QListWidget()
-        self.right_layout.addWidget(self.tag_list)
-        self.new_tag_input = QLineEdit()
-        self.setup_tag_autocomplete(self.new_tag_input)
-        self.new_tag_input.setPlaceholderText("Nueva etiqueta")
-        self.right_layout.addWidget(self.new_tag_input)
-        self.btn_add_tag = QPushButton("Agregar Etiqueta")
-        self.btn_add_tag.clicked.connect(self.add_tag)
-        self.right_layout.addWidget(self.btn_add_tag)
-        self.btn_remove_tag = QPushButton("Eliminar Etiqueta")
-        self.btn_remove_tag.clicked.connect(self.remove_tag)
-        self.right_layout.addWidget(self.btn_remove_tag)
-        self.btn_open_external = QPushButton("Abrir Ubicación")
-        self.btn_open_external.clicked.connect(self.external_app)
-        self.right_layout.addWidget(self.btn_open_external)
+        # Panel de etiquetas
+        self.tags_panel = ImageTagsPanel(self.tag_model, self.setup_tag_autocomplete)
+        self.tags_panel.tag_added.connect(self._on_tag_added)
+        self.tags_panel.tag_removed.connect(self._on_tag_removed)
+        self.tags_panel.open_external_requested.connect(self.external_app)
+        self.content_layout.addWidget(self.tags_panel, 1)
 
     def load_thumbnails_threaded(self):
-        # Detener el hilo anterior si todavía está en ejecución
-        # Esta comprobación ahora es segura porque `self.thread` será None si el anterior terminó.
-        if self.thread is not None and self.thread.isRunning():
-            self.worker.stop()
-            self.thread.quit()
-            self.thread.wait() # Espera a que el hilo termine limpiamente
-
-        self.clear_thumbnails_layout()
-
-        self.thread = QThread()
-        self.worker = ThumbnailWorker(self.navigation._images)
-        self.worker.moveToThread(self.thread)
-
-        self.thread.started.connect(self.worker.process_thumbnails)
-        self.worker.finished.connect(self.thread.quit)
-        
-        # Sigue siendo correcto eliminar los objetos para evitar fugas de memoria
-        self.worker.finished.connect(self.worker.deleteLater)
-        self.thread.finished.connect(self.thread.deleteLater)
-        
-        # --- CAMBIO CLAVE ---
-        # Conectamos la señal finished a nuestro nuevo método de limpieza
-        self.thread.finished.connect(self._clear_thread_references)
-
-        self.worker.thumbnail_ready.connect(self.add_thumbnail)
-        self.thread.start()
+        """Delega la carga de thumbnails al panel de miniaturas."""
+        self.thumbnail_panel.load_thumbnails_threaded(self.navigation._images)
     
-    def _clear_thread_references(self):
-        """Slot para limpiar las referencias al hilo y al worker una vez que han terminado."""
-        self.worker = None
-        self.thread = None
 
-    def add_thumbnail(self, path, pixmap, index):
-        thumb_label = QLabel()
-        thumb_label.setFixedSize(100, 100)
-        thumb_label.setPixmap(pixmap)
-        thumb_label.setAlignment(Qt.AlignCenter)
-        thumb_label.setFrameShape(QFrame.Box)
-        
-        thumb_label.setProperty("image_path", path)
-        thumb_label.mousePressEvent = lambda event, idx=index: self.thumbnail_clicked(idx)
 
-        row, col = divmod(len(self.thumbnail_labels), 3)
-        self.scroll_layout.addWidget(thumb_label, row, col, Qt.AlignCenter)
-        self.thumbnail_labels.append(thumb_label)
-        
-        if self.navigation.current_index() == index:
-            self.highlight_thumbnail()
+
     
-    def clear_thumbnails_layout(self):
-        # ... (Este método no cambia)
-        while self.scroll_layout.count():
-            child = self.scroll_layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
-        self.thumbnail_labels = []
 
     def highlight_thumbnail(self):
+        """Delega el resaltado de thumbnail al panel de miniaturas."""
         current_image = self.navigation.current_image()
-        if current_image is None:
-            return
-
-        for thumb_label in self.thumbnail_labels:
-            if thumb_label.property("image_path") == current_image:
-                thumb_label.setStyleSheet("border: 5px solid red;")
-                self.scroll_area.ensureWidgetVisible(thumb_label)
-            else:
-                thumb_label.setStyleSheet("")
+        self.thumbnail_panel.highlight_thumbnail(current_image)
 
     def show_image(self):
         try:
-
-
             current_image = self.navigation.current_image()
             if current_image is None:
                 return
 
             # Placeholder inmediato
-            self.image_label.setText("Cargando imagen...")
+            self.viewer_panel.set_loading_text("Cargando imagen...")
 
             current_index = self.navigation.current_index()
             total = self.navigation.count()
 
-            self.filename_label.setText(
-                f"{current_image.name} ({current_index + 1}/{total})"
+            self.viewer_panel.set_filename(
+                current_image.name, current_index, total
             )
 
             self.update_tag_list()
-            self.btn_prev.setEnabled(self.navigation.can_previous())
-            self.btn_next.setEnabled(self.navigation.can_next())
+            self.viewer_panel.set_navigation_enabled(
+                self.navigation.can_previous(),
+                self.navigation.can_next()
+            )
             self.highlight_thumbnail()
 
-            # 🔥 PEDIDO ASÍNCRONO
+            # Pedido asíncrono
             self.image_loader.request_preview_async(
                 current_image,
-                self.image_label.size()
+                self.viewer_panel.get_image_label_size()
             )
 
             # Preload sigue igual
@@ -260,7 +162,7 @@ class ImageViewer(QMainWindow):
 
         except Exception as e:
             print(f"[ImageViewer] Error en show_image: {e}")
-            self.image_label.setText("Error al mostrar la imagen.")
+            self.viewer_panel.set_loading_text("Error al mostrar la imagen.")
 
     def show_next(self):
         self.navigation.next()
@@ -335,7 +237,7 @@ class ImageViewer(QMainWindow):
         if not folder: return
         new_paths = get_image_paths(Path(folder))
         if not new_paths:
-            self.image_label.setText("No se encontraron imágenes a actualizar.")
+            self.viewer_panel.set_loading_text("No se encontraron imágenes a actualizar.")
             return
 
         for path in new_paths:
@@ -354,15 +256,16 @@ class ImageViewer(QMainWindow):
             self.load_thumbnails_threaded() # Usamos la versión con hilos
         except Exception as e:
             print(f"Error al actualizar la carpeta: {e}")
-            self.image_label.setText("Error al recargar vistas.")
+            self.viewer_panel.set_loading_text("Error al recargar vistas.")
 
-    def apply_filters(self):
+    def _on_apply_filters(self):
+        """Maneja la aplicación de filtros."""
         pos_text = self.positive_tags_input.text().strip()
         neg_text = self.negative_tags_input.text().strip()
 
         positive_tags = [t.strip() for t in pos_text.split(',') if t.strip()]
         negative_tags = [t.strip() for t in neg_text.split(',') if t.strip()]
-
+        
         # El controlador filtra y nos da la nueva lista
         filtered_paths = self.controller.apply_filters(
             positive_tags,
@@ -373,11 +276,9 @@ class ImageViewer(QMainWindow):
         self.navigation.set_images(filtered_paths)
 
         if not self.navigation.has_images():
-            self.image_label.setText("No se encontraron imágenes con esos filtros.")
-            self.clear_thumbnails_layout()
-            # Importante: show_image no se llama si no hay imágenes para evitar errores
-            self.btn_next.setEnabled(False)
-            self.btn_prev.setEnabled(False)
+            self.viewer_panel.set_loading_text("No se encontraron imágenes con esos filtros.")
+            self.thumbnail_panel.clear_thumbnails()
+            self.viewer_panel.set_navigation_enabled(False, False)
             return
 
         QTimer.singleShot(0, self.show_image)
@@ -392,48 +293,41 @@ class ImageViewer(QMainWindow):
         self.navigation.set_images(image_paths)
 
         if not self.navigation.has_images():
-                self.image_label.setText("No se encontraron imágenes.")
+                self.viewer_panel.set_loading_text("No se encontraron imágenes.")
                 # Deshabilitamos botones si la carpeta está vacía
-                self.btn_next.setEnabled(False)
-                self.btn_prev.setEnabled(False)
-                self.clear_thumbnails_layout()
+                self.viewer_panel.set_navigation_enabled(False, False)
+                self.thumbnail_panel.clear_thumbnails()
                 return
 
         self.show_image()
         self.load_thumbnails_threaded()
 
-    def remove_tag(self):
-        selected_items = self.tag_list.selectedItems()
-        
-        if not selected_items or self.navigation.count() == 0: 
+    def _on_tag_removed(self, tag_to_remove):
+        """Maneja la señal de eliminar etiqueta desde el panel de tags."""
+        if self.navigation.count() == 0:
             return
         
-        tag_to_remove = selected_items[0].text()
         current_image = self.navigation.current_image()
-
-        self.controller.remove_tag(current_image,tag_to_remove)
-        
+        self.controller.remove_tag(current_image, tag_to_remove)
         self.update_tag_list()
 
     def update_tag_list(self):
-        self.tag_list.clear()
+        """Actualiza la lista de etiquetas en el panel de tags."""
         current_image = self.navigation.current_image()
 
         if current_image is None:
+            self.tags_panel.clear_tag_list()
             return
         
-
         tags = self.controller.get_tags_for_image(current_image)
-
-        for tag in tags:
-            self.tag_list.addItem(tag)
+        self.tags_panel.update_tag_list(tags)
 
     def _preload_neighbors(self):
         count = self.navigation.count()
         if count == 0:
             return
 
-        size = self.image_label.size()
+        size = self.viewer_panel.get_image_label_size()
         index = self.navigation.current_index()
 
         # Imagen siguiente
@@ -452,28 +346,22 @@ class ImageViewer(QMainWindow):
             if current != path:
                 return  # llegó tarde, ignoramos
 
-            self.image_label.setPixmap(pixmap)
+            self.viewer_panel.set_image(pixmap)
         except Exception as e:
             print(f"[ImageViewer] Error al mostrar preview: {e}")
 
-    def add_tag(self):
+    def _on_tag_added(self, tags_to_add):
+        """Maneja la señal de agregar etiquetas desde el panel de tags."""
         current_image = self.navigation.current_image()
 
         if not current_image:
-                    print("[ImageViewer] No hay ninguna imagen seleccionada para etiquetar.")
-                    return
-        
-        new_tags_raw = self.new_tag_input.text().strip()
-        tags_to_add = [t.strip() for t in new_tags_raw.split(',') if t.strip()]
-
-        if not tags_to_add:
+            print("[ImageViewer] No hay ninguna imagen seleccionada para etiquetar.")
             return
         
         self.controller.add_tags(current_image, tags_to_add)
 
-        # 🔥 ESTA LÍNEA ES LA QUE ACTUALIZA EL AUTOCOMPLETADO AL INSTANTE
+        # Actualiza el autocompletado al instante
         self.tag_model.setStringList(self.image_service.get_all_tags())
-        self.new_tag_input.clear()
         self.update_tag_list()
 
     def setup_tag_autocomplete(self, line_edit: QLineEdit):
