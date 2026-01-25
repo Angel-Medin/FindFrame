@@ -1,22 +1,32 @@
-from PyQt5.QtCore import Qt, pyqtSignal, QThread
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QScrollArea, QGridLayout, QLabel, QFrame
 from PyQt5.QtGui import QPixmap
-from services.thumbnail_service import ThumbnailWorker
+from pathlib import Path
 
 
 class ThumbnailPanel(QWidget):
-    """Panel lateral izquierdo con miniaturas de imágenes."""
+    """Panel lateral izquierdo con miniaturas de imágenes con lazy loading."""
     
-    # Señal para notificar cuando se hace clic en una miniatura
-    thumbnail_clicked = pyqtSignal(int)  # index
+    thumbnail_clicked = pyqtSignal(int)
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self.thumbnail_labels = []
-        self.thread = None
-        self.worker = None
+        self.image_paths = []
+        self.loaded_indices = set()  # Índices ya cargados
+        
+        # Configuración de lazy loading
+        self.buffer_size = 15  # Cantidad de thumbnails a precargar fuera del viewport
+        self.thumbnails_per_row = 3
+        self.thumbnail_size = 100
+        
         self._setup_ui()
-    
+        
+        # Timer para evitar cargas excesivas durante scroll rápido
+        self.scroll_timer = QTimer()
+        self.scroll_timer.setSingleShot(True)
+        self.scroll_timer.timeout.connect(self._load_visible_thumbnails)
+        
     def _setup_ui(self):
         """Configura la interfaz del panel de miniaturas."""
         layout = QVBoxLayout(self)
@@ -28,6 +38,9 @@ class ThumbnailPanel(QWidget):
         self.scroll_area.setFixedWidth(320)
         self.scroll_area.setFocusPolicy(Qt.NoFocus)
         
+        # Conectar evento de scroll
+        self.scroll_area.verticalScrollBar().valueChanged.connect(self._on_scroll)
+        
         self.scroll_widget = QWidget()
         self.scroll_layout = QGridLayout(self.scroll_widget)
         self.scroll_layout.setContentsMargins(0, 0, 0, 0)
@@ -36,48 +49,130 @@ class ThumbnailPanel(QWidget):
         self.scroll_area.setWidget(self.scroll_widget)
         layout.addWidget(self.scroll_area)
     
-    def load_thumbnails_threaded(self, images):
-        """Carga las miniaturas en un hilo separado."""
-        # Detener el hilo anterior si todavía está en ejecución
-        if self.thread is not None and self.thread.isRunning():
-            self.worker.stop()
-            self.thread.quit()
-            self.thread.wait()
-        
+    def set_images(self, images):
+        """
+        Establece la lista de imágenes y crea placeholders.
+        No carga las miniaturas inmediatamente.
+        """
         self.clear_thumbnails()
+        self.image_paths = images
+        self.loaded_indices.clear()
         
-        self.thread = QThread()
-        self.worker = ThumbnailWorker(images)
-        self.worker.moveToThread(self.thread)
+        # Crear placeholders para todas las imágenes
+        for index in range(len(images)):
+            self._create_placeholder(index)
         
-        self.thread.started.connect(self.worker.process_thumbnails)
-        self.worker.finished.connect(self.thread.quit)
-        self.worker.finished.connect(self.worker.deleteLater)
-        self.thread.finished.connect(self.thread.deleteLater)
-        self.thread.finished.connect(self._clear_thread_references)
-        
-        self.worker.thumbnail_ready.connect(self.add_thumbnail)
-        self.thread.start()
+        # Cargar las primeras miniaturas visibles
+        QTimer.singleShot(100, self._load_visible_thumbnails)
     
-    def _clear_thread_references(self):
-        """Limpia las referencias al hilo y al worker una vez que han terminado."""
-        self.worker = None
-        self.thread = None
-    
-    def add_thumbnail(self, path, pixmap, index):
-        """Añade una miniatura al grid."""
+    def _create_placeholder(self, index):
+        """Crea un placeholder vacío para una miniatura."""
         thumb_label = QLabel()
-        thumb_label.setFixedSize(100, 100)
-        thumb_label.setPixmap(pixmap)
+        thumb_label.setFixedSize(self.thumbnail_size, self.thumbnail_size)
         thumb_label.setAlignment(Qt.AlignCenter)
         thumb_label.setFrameShape(QFrame.Box)
+        thumb_label.setStyleSheet("background-color: #e0e0e0;")
+        thumb_label.setText("...")
         
-        thumb_label.setProperty("image_path", path)
+        thumb_label.setProperty("image_index", index)
+        thumb_label.setProperty("image_path", self.image_paths[index])
         thumb_label.mousePressEvent = lambda event, idx=index: self._on_thumbnail_clicked(idx)
         
-        row, col = divmod(len(self.thumbnail_labels), 3)
+        row, col = divmod(index, self.thumbnails_per_row)
         self.scroll_layout.addWidget(thumb_label, row, col, Qt.AlignCenter)
         self.thumbnail_labels.append(thumb_label)
+    
+    def _on_scroll(self):
+        """Maneja el evento de scroll con debounce."""
+        # Reiniciar el timer cada vez que hay scroll
+        self.scroll_timer.start(150)  # 150ms de debounce
+    
+    def _load_visible_thumbnails(self):
+        """Carga las miniaturas visibles + buffer."""
+        if not self.image_paths:
+            return
+        
+        # Calcular rango visible
+        viewport_rect = self.scroll_area.viewport().rect()
+        visible_indices = self._get_visible_indices(viewport_rect)
+        
+        if not visible_indices:
+            return
+        
+        # Añadir buffer (thumbnails arriba y abajo del viewport)
+        start_index = max(0, min(visible_indices) - self.buffer_size)
+        end_index = min(len(self.image_paths), max(visible_indices) + self.buffer_size + 1)
+        
+        # Debug (opcional, puedes comentar después)
+        # print(f"Visible: {min(visible_indices)}-{max(visible_indices)}, Loading: {start_index}-{end_index}")
+        
+        # Cargar solo las que no están cargadas
+        for index in range(start_index, end_index):
+            if index not in self.loaded_indices:
+                self._load_thumbnail(index)
+    
+    def _get_visible_indices(self, viewport_rect):
+        """Determina qué índices de thumbnails están visibles."""
+        visible_indices = []
+        
+        # Obtener la posición del scroll
+        scroll_y = self.scroll_area.verticalScrollBar().value()
+        viewport_top = scroll_y
+        viewport_bottom = scroll_y + viewport_rect.height()
+        
+        for index, thumb_label in enumerate(self.thumbnail_labels):
+            # Obtener la posición global del widget en el scroll_widget
+            widget_global_pos = thumb_label.pos()
+            widget_top = widget_global_pos.y()
+            widget_bottom = widget_top + thumb_label.height()
+            
+            # Verificar si el widget está dentro del viewport
+            if widget_bottom >= viewport_top and widget_top <= viewport_bottom:
+                visible_indices.append(index)
+        
+        return visible_indices if visible_indices else [0]
+    
+    def _load_thumbnail(self, index):
+        """Carga una miniatura específica de forma síncrona."""
+        if index >= len(self.image_paths) or index in self.loaded_indices:
+            return
+        
+        path = self.image_paths[index]
+        
+        # Intentar cargar desde cache
+        thumb_folder = path.parent / ".thumbnails"
+        thumb_path = thumb_folder / path.name
+        
+        thumbnail = None
+        if thumb_path.exists():
+            thumbnail = QPixmap(str(thumb_path))
+            if thumbnail.isNull():
+                thumbnail = None
+        
+        # Si no hay cache, generar thumbnail
+        if thumbnail is None:
+            original_pixmap = QPixmap(str(path))
+            if original_pixmap.isNull():
+                return
+            
+            thumbnail = original_pixmap.scaled(
+                self.thumbnail_size, 
+                self.thumbnail_size, 
+                Qt.KeepAspectRatio, 
+                Qt.FastTransformation
+            )
+            
+            # Guardar en cache
+            thumb_folder.mkdir(parents=True, exist_ok=True)
+            thumbnail.save(str(thumb_path))
+        
+        # Actualizar el label
+        if index < len(self.thumbnail_labels):
+            thumb_label = self.thumbnail_labels[index]
+            thumb_label.setPixmap(thumbnail)
+            thumb_label.setText("")
+            thumb_label.setStyleSheet("")
+            self.loaded_indices.add(index)
     
     def clear_thumbnails(self):
         """Limpia todas las miniaturas del layout."""
@@ -86,6 +181,8 @@ class ThumbnailPanel(QWidget):
             if child.widget():
                 child.widget().deleteLater()
         self.thumbnail_labels = []
+        self.image_paths = []
+        self.loaded_indices.clear()
     
     def highlight_thumbnail(self, current_image_path):
         """Resalta la miniatura de la imagen actual."""
@@ -96,9 +193,26 @@ class ThumbnailPanel(QWidget):
             if thumb_label.property("image_path") == current_image_path:
                 thumb_label.setStyleSheet("border: 5px solid red;")
                 self.scroll_area.ensureWidgetVisible(thumb_label)
+                
+                # Asegurar que la miniatura actual esté cargada
+                index = thumb_label.property("image_index")
+                if index not in self.loaded_indices:
+                    self._load_thumbnail(index)
             else:
-                thumb_label.setStyleSheet("")
+                # Solo resetear estilo si ya está cargado
+                index = thumb_label.property("image_index")
+                if index in self.loaded_indices:
+                    thumb_label.setStyleSheet("")
     
     def _on_thumbnail_clicked(self, index):
         """Emite señal cuando se hace clic en una miniatura."""
         self.thumbnail_clicked.emit(index)
+    
+    def preload_around_index(self, index):
+        """Precarga thumbnails alrededor de un índice específico."""
+        start = max(0, index - self.buffer_size)
+        end = min(len(self.image_paths), index + self.buffer_size + 1)
+        
+        for i in range(start, end):
+            if i not in self.loaded_indices:
+                self._load_thumbnail(i)

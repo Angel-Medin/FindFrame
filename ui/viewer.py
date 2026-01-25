@@ -125,51 +125,11 @@ class ImageViewer(QMainWindow):
         self.tags_panel.tag_removed.connect(self._on_tag_removed)
         self.tags_panel.open_external_requested.connect(self.external_app)
         self.content_layout.addWidget(self.tags_panel, 1)
-
-    def load_thumbnails_threaded(self):
-        """Delega la carga de thumbnails al panel de miniaturas."""
-        self.thumbnail_panel.load_thumbnails_threaded(self.navigation._images)
-    
+   
     def highlight_thumbnail(self):
         """Delega el resaltado de thumbnail al panel de miniaturas."""
         current_image = self.navigation.current_image()
         self.thumbnail_panel.highlight_thumbnail(current_image)
-
-    def show_image(self):
-        try:
-            current_image = self.navigation.current_image()
-            if current_image is None:
-                return
-
-            # Placeholder inmediato
-            self.viewer_panel.set_loading_text("Cargando imagen...")
-
-            current_index = self.navigation.current_index()
-            total = self.navigation.count()
-
-            self.viewer_panel.set_filename(
-                current_image.name, current_index, total
-            )
-
-            self.update_tag_list()
-            self.viewer_panel.set_navigation_enabled(
-                self.navigation.can_previous(),
-                self.navigation.can_next()
-            )
-            self.highlight_thumbnail()
-
-            # Pedido asíncrono
-            self.image_loader.request_preview_async(
-                current_image,
-                self.viewer_panel.get_image_label_size()
-            )
-
-            # Preload sigue igual
-            self._preload_neighbors()
-
-        except Exception as e:
-            print(f"[ImageViewer] Error en show_image: {e}")
-            self.viewer_panel.set_loading_text("Error al mostrar la imagen.")
 
     def show_next(self):
         self.navigation.next()
@@ -378,7 +338,6 @@ class ImageViewer(QMainWindow):
         completer.setCompletionMode(QCompleter.PopupCompletion)
         line_edit.setCompleter(completer)
 
-
     def _on_toggle_guides(self, enabled):
         """Activa/desactiva el modo de guías en el visor."""
         self.viewer_panel.image_label.toggle_guides(enabled)
@@ -407,6 +366,48 @@ class ImageViewer(QMainWindow):
         """Cambia el color de la grilla."""
         self.viewer_panel.image_label.set_grid_color(color)
 
+    def load_thumbnails_threaded(self):
+        """Carga lazy de thumbnails usando el nuevo sistema."""
+        # Ya no usa threads, el panel maneja todo internamente
+        self.thumbnail_panel.set_images(self.navigation._images)
 
+    def show_image(self):
+        try:
+            current_image = self.navigation.current_image()
+            if current_image is None:
+                return
+
+            # Placeholder inmediato
+            self.viewer_panel.set_loading_text("Cargando imagen...")
+
+            current_index = self.navigation.current_index()
+            total = self.navigation.count()
+
+            self.viewer_panel.set_filename(
+                current_image.name, current_index, total
+            )
+
+            self.update_tag_list()
+            self.viewer_panel.set_navigation_enabled(
+                self.navigation.can_previous(),
+                self.navigation.can_next()
+            )
+            self.highlight_thumbnail()
+            
+            # 👇 NUEVO: Precargar thumbnails alrededor de la imagen actual
+            self.thumbnail_panel.preload_around_index(current_index)
+
+            # Pedido asíncrono
+            self.image_loader.request_preview_async(
+                current_image,
+                self.viewer_panel.get_image_label_size()
+            )
+
+            # Preload sigue igual
+            self._preload_neighbors()
+
+        except Exception as e:
+            print(f"[ImageViewer] Error en show_image: {e}")
+            self.viewer_panel.set_loading_text("Error al mostrar la imagen.")
 
 
