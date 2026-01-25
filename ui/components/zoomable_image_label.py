@@ -1,12 +1,12 @@
 from PyQt5.QtWidgets import QLabel
-from PyQt5.QtCore import Qt, pyqtSignal, QPoint, QRect
+from PyQt5.QtCore import Qt, pyqtSignal, QPoint, QRect, QPointF
 from PyQt5.QtGui import QPixmap, QCursor, QPainter, QPen, QColor
 
 class ZoomableImageLabel(QLabel):
     """
     Etiqueta que permite hacer zoom con la rueda del mouse y
     desplazarse (pan) arrastrando la imagen.
-    Ahora con soporte para guías y grillas.
+    Ahora con soporte para guías y grillas que mantienen su posición relativa.
     """
     
     def __init__(self, parent=None):
@@ -24,19 +24,19 @@ class ZoomableImageLabel(QLabel):
         self._panning = False
         self._last_mouse_pos = QPoint()
         
-        # Sistema de guías
+        # Sistema de guías (ahora en coordenadas normalizadas 0.0-1.0)
         self._guides_enabled = False
-        self._guides_locked = False  # Nuevo: bloqueo de guías
-        self._guide_mode = 'vertical'  # 'vertical' o 'horizontal'
-        self._vertical_guides = []
-        self._horizontal_guides = []
+        self._guides_locked = False
+        self._guide_mode = 'vertical'
+        self._vertical_guides = []  # Lista de valores 0.0-1.0 (posición relativa en la imagen)
+        self._horizontal_guides = []  # Lista de valores 0.0-1.0
         self._dragging_guide = None
         self._guide_snap_distance = 5
         
-        # Sistema de grilla
+        # Sistema de grilla (ahora relativo al tamaño de la imagen)
         self._grid_enabled = False
-        self._grid_spacing = 50
-        self._grid_color = QColor(100, 100, 255, 150)  # Color personalizable
+        self._grid_spacing = 50  # En píxeles de la imagen original
+        self._grid_color = QColor(100, 100, 255, 150)
         
         self.setMouseTracking(True)
 
@@ -104,8 +104,8 @@ class ZoomableImageLabel(QLabel):
             self._draw_guides(painter)
 
     def _draw_grid(self, painter):
-        """Dibuja la grilla sobre la imagen."""
-        if not hasattr(self, '_image_rect'):
+        """Dibuja la grilla sobre la imagen manteniendo posición relativa."""
+        if not hasattr(self, '_image_rect') or not self._pixmap:
             return
         
         pen = QPen(self._grid_color)
@@ -115,41 +115,51 @@ class ZoomableImageLabel(QLabel):
         
         rect = self._image_rect
         
+        # Calcular el espaciado escalado según el zoom actual
+        scaled_spacing = int(self._grid_spacing * self._scale_factor)
+        
+        # Evitar división por cero o espaciado muy pequeño
+        if scaled_spacing < 1:
+            scaled_spacing = 1
+        
         # Líneas verticales
         x = rect.left()
         while x <= rect.right():
-            painter.drawLine(x, rect.top(), x, rect.bottom())
-            x += self._grid_spacing
+            painter.drawLine(int(x), rect.top(), int(x), rect.bottom())
+            x += scaled_spacing
         
         # Líneas horizontales
         y = rect.top()
         while y <= rect.bottom():
-            painter.drawLine(rect.left(), y, rect.right(), y)
-            y += self._grid_spacing
+            painter.drawLine(rect.left(), int(y), rect.right(), int(y))
+            y += scaled_spacing
+
 
     def _draw_guides(self, painter):
-        """Dibuja las guías sobre la imagen."""
-        if not hasattr(self, '_image_rect'):
+        """Dibuja las guías sobre la imagen manteniendo posición relativa."""
+        if not hasattr(self, '_image_rect') or not self._pixmap:
             return
         
         rect = self._image_rect
         
         # Color diferente si están bloqueadas
         if self._guides_locked:
-            pen = QPen(QColor(150, 150, 150, 180))  # Gris cuando están bloqueadas
+            pen = QPen(QColor(0, 0, 139, 180))
         else:
-            pen = QPen(QColor(255, 0, 0, 200))  # Rojo cuando están activas
+            pen = QPen(QColor(220, 20, 60, 180))
         
         pen.setWidth(2)
         painter.setPen(pen)
         
-        # Guías verticales
-        for x in self._vertical_guides:
+        # Guías verticales (convertir de coordenadas normalizadas a píxeles)
+        for normalized_x in self._vertical_guides:
+            x = rect.left() + int(normalized_x * rect.width())
             if rect.left() <= x <= rect.right():
                 painter.drawLine(x, rect.top(), x, rect.bottom())
         
-        # Guías horizontales
-        for y in self._horizontal_guides:
+        # Guías horizontales (convertir de coordenadas normalizadas a píxeles)
+        for normalized_y in self._horizontal_guides:
+            y = rect.top() + int(normalized_y * rect.height())
             if rect.top() <= y <= rect.bottom():
                 painter.drawLine(rect.left(), y, rect.right(), y)
 
@@ -195,11 +205,17 @@ class ZoomableImageLabel(QLabel):
             else:
                 # Crear nueva guía según el modo seleccionado
                 if hasattr(self, '_image_rect') and self._image_rect.contains(pos):
+                    rect = self._image_rect
+                    
                     if self._guide_mode == 'vertical':
-                        self._vertical_guides.append(pos.x())
+                        # Convertir posición de píxeles a normalizada (0.0-1.0)
+                        normalized_x = (pos.x() - rect.left()) / rect.width()
+                        self._vertical_guides.append(normalized_x)
                         self._dragging_guide = ('vertical', len(self._vertical_guides) - 1)
                     else:  # horizontal
-                        self._horizontal_guides.append(pos.y())
+                        # Convertir posición de píxeles a normalizada (0.0-1.0)
+                        normalized_y = (pos.y() - rect.top()) / rect.height()
+                        self._horizontal_guides.append(normalized_y)
                         self._dragging_guide = ('horizontal', len(self._horizontal_guides) - 1)
                     
                     self.update()
@@ -209,14 +225,24 @@ class ZoomableImageLabel(QLabel):
         
         # Si está arrastrando una guía (solo si no están bloqueadas)
         if not self._guides_locked and self._guides_enabled and self._dragging_guide:
+            if not hasattr(self, '_image_rect'):
+                return
+                
             guide_type, index = self._dragging_guide
+            rect = self._image_rect
             
             if guide_type == 'vertical':
                 if 0 <= index < len(self._vertical_guides):
-                    self._vertical_guides[index] = pos.x()
+                    # Convertir posición del mouse a coordenadas normalizadas
+                    if rect.left() <= pos.x() <= rect.right():
+                        normalized_x = (pos.x() - rect.left()) / rect.width()
+                        self._vertical_guides[index] = max(0.0, min(1.0, normalized_x))
             else:
                 if 0 <= index < len(self._horizontal_guides):
-                    self._horizontal_guides[index] = pos.y()
+                    # Convertir posición del mouse a coordenadas normalizadas
+                    if rect.top() <= pos.y() <= rect.bottom():
+                        normalized_y = (pos.y() - rect.top()) / rect.height()
+                        self._horizontal_guides[index] = max(0.0, min(1.0, normalized_y))
             
             self.update()
             return
@@ -275,13 +301,20 @@ class ZoomableImageLabel(QLabel):
 
     def _find_guide_near(self, pos):
         """Encuentra una guía cerca de la posición dada."""
+        if not hasattr(self, '_image_rect'):
+            return None
+        
+        rect = self._image_rect
+        
         # Buscar guía vertical
-        for i, x in enumerate(self._vertical_guides):
+        for i, normalized_x in enumerate(self._vertical_guides):
+            x = rect.left() + int(normalized_x * rect.width())
             if abs(pos.x() - x) < self._guide_snap_distance:
                 return ('vertical', i)
         
         # Buscar guía horizontal
-        for i, y in enumerate(self._horizontal_guides):
+        for i, normalized_y in enumerate(self._horizontal_guides):
+            y = rect.top() + int(normalized_y * rect.height())
             if abs(pos.y() - y) < self._guide_snap_distance:
                 return ('horizontal', i)
         
@@ -332,7 +365,7 @@ class ZoomableImageLabel(QLabel):
         self.update()
 
     def set_grid_spacing(self, spacing):
-        """Establece el espaciado de la grilla."""
+        """Establece el espaciado de la grilla (en píxeles de la imagen original)."""
         self._grid_spacing = max(10, spacing)
         self.update()
 
