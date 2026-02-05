@@ -98,6 +98,47 @@ class ImageService:
     def get_all_tags(self) -> list[str]:
         return self.tag_manager.get_all_tags()
 
+    def add_tag_to_folder(self, image_paths, tag):
+        """
+        Agrega un tag a múltiples imágenes.
+        Args:
+            image_paths (list[Path]): Lista de rutas de imágenes
+            tag (str): Nombre del tag a agregar
+        Returns:
+            int: Cantidad de imágenes procesadas exitosamente
+        """
+        count = self.tag_manager.add_tag_to_folder(image_paths, tag)
+        # Invalidar caches
+        self._tags_cache.clear()
+        self._filter_cache.clear()
+        return count
+
+    def count_images_with_tag(self, tag):
+        """
+        Cuenta cuántas imágenes tienen un tag específico.
+        Args:
+            tag (str): Nombre del tag a consultar
+        Returns:
+            int: Cantidad de imágenes con ese tag
+        """
+        return self.tag_manager.count_images_with_tag(tag)
+
+    def delete_tag_globally(self, tag):
+        """
+        Elimina un tag de la base de datos y de todas las imágenes asociadas.
+        Args:
+            tag (str): Nombre del tag a eliminar
+        Returns:
+            bool: True si se eliminó exitosamente, False si no existía
+        """
+        success = self.tag_manager.delete_tag_globally(tag)
+        if success:
+            # Invalidar todos los caches
+            self._tags_cache.clear()
+            self._filter_cache.clear()
+            self._image_id_cache.clear()
+        return success
+
 
 
 

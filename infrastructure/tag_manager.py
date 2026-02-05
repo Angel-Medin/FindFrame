@@ -307,6 +307,69 @@ class TagManagerSQLite:
         cursor.execute("SELECT name FROM tag ORDER BY name ASC")
         return [row[0] for row in cursor.fetchall()]
 
+    def add_tag_to_folder(self, image_paths, tag):
+        """
+        Agrega un tag a múltiples imágenes.
+        Args:
+            image_paths (list[Path]): Lista de rutas de imágenes
+            tag (str): Nombre del tag a agregar
+        Returns:
+            int: Cantidad de imágenes procesadas exitosamente
+        """
+        count = 0
+        for path in image_paths:
+            try:
+                self.add_tag(path, tag)
+                count += 1
+            except Exception as e:
+                print(f"Error al agregar tag a {path}: {e}")
+        return count
+
+    def count_images_with_tag(self, tag):
+        """
+        Cuenta cuántas imágenes tienen un tag específico.
+        Args:
+            tag (str): Nombre del tag a consultar
+        Returns:
+            int: Cantidad de imágenes con ese tag
+        """
+        cursor = self.conn.cursor()
+        query = """
+            SELECT COUNT(DISTINCT img_id)
+            FROM img_tag
+            JOIN tag ON tag.id = img_tag.tag_id
+            WHERE tag.name = ?
+        """
+        cursor.execute(query, (tag,))
+        result = cursor.fetchone()
+        return result[0] if result else 0
+
+    def delete_tag_globally(self, tag):
+        """
+        Elimina un tag de la base de datos y de todas las imágenes asociadas.
+        Args:
+            tag (str): Nombre del tag a eliminar
+        Returns:
+            bool: True si se eliminó exitosamente, False si no existía
+        """
+        cursor = self.conn.cursor()
+        tag_id = self.get_tag_id(tag)
+        
+        if not tag_id:
+            return False
+        
+        try:
+            # Primero eliminamos las relaciones (aunque CASCADE lo haría automáticamente)
+            cursor.execute("DELETE FROM img_tag WHERE tag_id = ?", (tag_id,))
+            # Luego eliminamos el tag
+            cursor.execute("DELETE FROM tag WHERE id = ?", (tag_id,))
+            self.conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error al eliminar tag '{tag}': {e}")
+            self.conn.rollback()
+            return False
+
 
 
 

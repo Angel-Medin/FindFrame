@@ -40,3 +40,34 @@ class ImageController:
         Devuelve una lista de tags para una imagen.
         """
         return self.image_service.get_tags(image_path)
+
+    def add_tag_to_folder(self, image_paths, tag):
+        """
+        Agrega un tag a todas las imágenes de una lista.
+        Args:
+            image_paths (list[Path]): Lista de rutas de imágenes
+            tag (str): Nombre del tag a agregar
+        Returns:
+            int: Cantidad de imágenes procesadas
+        """
+        return self.image_service.add_tag_to_folder(image_paths, tag)
+
+    def count_images_with_tag(self, tag):
+        """
+        Cuenta cuántas imágenes tienen un tag específico.
+        Args:
+            tag (str): Nombre del tag
+        Returns:
+            int: Cantidad de imágenes con ese tag
+        """
+        return self.image_service.count_images_with_tag(tag)
+
+    def delete_tag_globally(self, tag):
+        """
+        Elimina un tag de la base de datos y de todas las imágenes.
+        Args:
+            tag (str): Nombre del tag a eliminar
+        Returns:
+            bool: True si se eliminó exitosamente
+        """
+        return self.image_service.delete_tag_globally(tag)

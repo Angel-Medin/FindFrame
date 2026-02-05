@@ -80,6 +80,10 @@ class ImageViewer(QMainWindow):
         self.toolbar.grid_spacing_changed.connect(self._on_grid_spacing_changed)
         self.toolbar.grid_color_changed.connect(self._on_grid_color_changed)
                 
+        # Conexiones para el menú de opciones
+        self.toolbar.add_bulk_tag_requested.connect(self._on_add_bulk_tag)
+        self.toolbar.rename_images_requested.connect(self._on_rename_images)
+        self.toolbar.delete_tag_requested.connect(self._on_delete_tag)
             
         
         self.main_layout.addWidget(self.toolbar)
@@ -409,5 +413,112 @@ class ImageViewer(QMainWindow):
         except Exception as e:
             print(f"[ImageViewer] Error en show_image: {e}")
             self.viewer_panel.set_loading_text("Error al mostrar la imagen.")
+
+    def _on_add_bulk_tag(self):
+        """Maneja la opción de agregar tag masivo a carpeta."""
+        from ui.components.options_dialogs import BulkTagDialog
+        from infrastructure.image_loader import get_image_paths
+        from pathlib import Path
+        
+        dialog = BulkTagDialog(self.tag_model, self.setup_tag_autocomplete, self)
+        if dialog.exec_():
+            folder_path = Path(dialog.folder_path)
+            tag = dialog.tag
+            
+            # Obtener imágenes de la carpeta
+            image_paths = get_image_paths(folder_path)
+            
+            if not image_paths:
+                from PyQt5.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Advertencia", 
+                                  "No se encontraron imágenes en la carpeta seleccionada.")
+                return
+            
+            # Agregar tag a todas las imágenes
+            count = self.controller.add_tag_to_folder(image_paths, tag)
+            
+            # Actualizar el autocompleter si se agregó un nuevo tag
+            self.tag_model.setStringList(self.image_service.get_all_tags())
+            
+            # Mostrar mensaje de éxito
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.information(self, "Éxito", 
+                                  f"Se agregó el tag '{tag}' a {count} imagen(es).")
+
+    def _on_rename_images(self):
+        """Maneja la opción de renombrar imágenes con prefijo."""
+        from ui.components.options_dialogs import RenameImagesDialog
+        from infrastructure.file_renamer import rename_images_with_prefix
+        from pathlib import Path
+        
+        dialog = RenameImagesDialog(self)
+        if dialog.exec_():
+            folder_path = Path(dialog.folder_path)
+            prefix = dialog.prefix
+            
+            # Renombrar imágenes
+            result = rename_images_with_prefix(folder_path, prefix)
+            renamed = result["renamed"]
+            errors = result["errors"]
+            
+            # Actualizar rutas en base de datos
+            for old_path, new_path in renamed.items():
+                old_name = Path(old_path).name
+                self.tag_manager.update_image_url(old_name, new_path)
+            
+            # Mostrar resultado
+            from PyQt5.QtWidgets import QMessageBox
+            message = f"Se renombraron {len(renamed)} imagen(es) exitosamente."
+            if errors:
+                message += f"\n\nErrores ({len(errors)}):\n" + "\n".join(errors[:5])
+                if len(errors) > 5:
+                    message += f"\n... y {len(errors) - 5} errores más."
+            
+            QMessageBox.information(self, "Resultado del Renombrado", message)
+            
+            # Si la carpeta actual está siendo visualizada, refrescar
+            if self.navigation.has_images():
+                current_image = self.navigation.current_image()
+                if current_image and current_image.parent == folder_path:
+                    # Recargar la carpeta
+                    from infrastructure.image_loader import get_image_paths
+                    image_paths = get_image_paths(folder_path)
+                    self.navigation.set_images(image_paths)
+                    self.show_image()
+                    self.load_thumbnails_threaded()
+
+    def _on_delete_tag(self):
+        """Maneja la opción de eliminar tag de la base de datos."""
+        from ui.components.options_dialogs import DeleteTagDialog
+        
+        dialog = DeleteTagDialog(
+            self.tag_model, 
+            self.setup_tag_autocomplete,
+            self.controller.count_images_with_tag,
+            self
+        )
+        
+        if dialog.exec_():
+            tag = dialog.tag_to_delete
+            
+            # Eliminar tag
+            success = self.controller.delete_tag_globally(tag)
+            
+            if success:
+                # Actualizar el autocompleter
+                self.tag_model.setStringList(self.image_service.get_all_tags())
+                
+                # Refrescar la lista de tags de la imagen actual si está visible
+                if self.navigation.has_images():
+                    self.update_tag_list()
+                
+                # Mostrar mensaje de éxito
+                from PyQt5.QtWidgets import QMessageBox
+                QMessageBox.information(self, "Éxito", 
+                                      f"El tag '{tag}' fue eliminado exitosamente de la base de datos.")
+            else:
+                from PyQt5.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Error", 
+                                  f"No se pudo eliminar el tag '{tag}'.")
 
 

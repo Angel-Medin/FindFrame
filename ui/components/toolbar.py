@@ -1,6 +1,6 @@
 from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QPushButton, QLineEdit, 
-                             QSpinBox, QLabel, QComboBox, QColorDialog)
+                             QSpinBox, QLabel, QComboBox, QColorDialog, QMenu)
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor
 
@@ -18,6 +18,11 @@ class Toolbar(QWidget):
     toggle_grid_requested = pyqtSignal(bool)
     grid_spacing_changed = pyqtSignal(int)
     grid_color_changed = pyqtSignal(QColor)
+    
+    # Señales para el menú de opciones
+    add_bulk_tag_requested = pyqtSignal()
+    rename_images_requested = pyqtSignal()
+    delete_tag_requested = pyqtSignal()
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -38,6 +43,25 @@ class Toolbar(QWidget):
         self.btn_update_folder = QPushButton("Actualizar Carpeta")
         self.btn_update_folder.clicked.connect(self._on_update_folder_clicked)
         layout.addWidget(self.btn_update_folder)
+        
+        # Botón de Opciones con menú desplegable
+        self.btn_options = QPushButton("Opciones")
+        self.options_menu = QMenu(self)
+        
+        # Agregar acciones al menú
+        action_bulk_tag = self.options_menu.addAction("Agregar Tag a Carpeta")
+        action_bulk_tag.triggered.connect(lambda: self.add_bulk_tag_requested.emit())
+        
+        action_rename = self.options_menu.addAction("Renombrar Imágenes con Prefijo")
+        action_rename.triggered.connect(lambda: self.rename_images_requested.emit())
+        
+        self.options_menu.addSeparator()
+        
+        action_delete_tag = self.options_menu.addAction("Eliminar Tag de Base de Datos")
+        action_delete_tag.triggered.connect(lambda: self.delete_tag_requested.emit())
+        
+        self.btn_options.setMenu(self.options_menu)
+        layout.addWidget(self.btn_options)
         
         # Separador visual
         layout.addWidget(QLabel("|"))
