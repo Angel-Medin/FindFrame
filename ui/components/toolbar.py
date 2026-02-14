@@ -18,6 +18,7 @@ class Toolbar(QWidget):
     toggle_grid_requested = pyqtSignal(bool)
     grid_spacing_changed = pyqtSignal(int)
     grid_color_changed = pyqtSignal(QColor)
+    mirror_requested = pyqtSignal(bool)
     
     # Señales para el menú de opciones
     add_bulk_tag_requested = pyqtSignal()
@@ -117,6 +118,16 @@ class Toolbar(QWidget):
         self._update_grid_color_button()
         layout.addWidget(self.btn_grid_color)
         
+        # Separador visual
+        layout.addWidget(QLabel("|"))
+        
+        # Botón para espejar la imagen
+        self.btn_mirror = QPushButton("Espejo")
+        self.btn_mirror.setCheckable(True)
+        self.btn_mirror.clicked.connect(self._on_mirror)
+        self.btn_mirror.setToolTip("Espejar la imagen horizontalmente")
+        layout.addWidget(self.btn_mirror)
+        
         # Espaciador para empujar los botones a la izquierda
         layout.addStretch()
     
@@ -169,6 +180,11 @@ class Toolbar(QWidget):
             self._grid_color = color
             self._update_grid_color_button()
             self.grid_color_changed.emit(color)
+    
+    def _on_mirror(self, checked):
+        """Emite señal cuando se activa/desactiva el espejo."""
+        self.btn_mirror.setText("Espejo ✓" if checked else "Espejo")
+        self.mirror_requested.emit(checked)
     
     def _update_grid_color_button(self):
         """Actualiza el color de fondo del botón de color."""

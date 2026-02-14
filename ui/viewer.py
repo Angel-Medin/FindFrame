@@ -79,6 +79,7 @@ class ImageViewer(QMainWindow):
         self.toolbar.toggle_grid_requested.connect(self._on_toggle_grid)
         self.toolbar.grid_spacing_changed.connect(self._on_grid_spacing_changed)
         self.toolbar.grid_color_changed.connect(self._on_grid_color_changed)
+        self.toolbar.mirror_requested.connect(self._on_mirror_image)
                 
         # Conexiones para el menú de opciones
         self.toolbar.add_bulk_tag_requested.connect(self._on_add_bulk_tag)
@@ -369,6 +370,10 @@ class ImageViewer(QMainWindow):
     def _on_grid_color_changed(self, color):
         """Cambia el color de la grilla."""
         self.viewer_panel.image_label.set_grid_color(color)
+
+    def _on_mirror_image(self, enabled):
+        """Espeja la imagen horizontalmente."""
+        self.viewer_panel.image_label.mirror_image(enabled)
 
     def load_thumbnails_threaded(self):
         """Carga lazy de thumbnails usando el nuevo sistema."""

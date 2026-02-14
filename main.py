@@ -4,7 +4,10 @@ from ui.viewer import ImageViewer
 from infrastructure.logging_config import setup_logging
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
+if getattr(sys, 'frozen', False):
+    BASE_DIR = Path(sys.executable).parent
+else:
+    BASE_DIR = Path(__file__).resolve().parent
 STYLE_PATH = BASE_DIR / "assets" / "style.qss"
 
 

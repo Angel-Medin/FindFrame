@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import QLabel
 from PyQt5.QtCore import Qt, pyqtSignal, QPoint, QRect, QPointF
-from PyQt5.QtGui import QPixmap, QCursor, QPainter, QPen, QColor
+from PyQt5.QtGui import QPixmap, QCursor, QPainter, QPen, QColor, QTransform
 
 class ZoomableImageLabel(QLabel):
     """
@@ -37,6 +37,9 @@ class ZoomableImageLabel(QLabel):
         self._grid_enabled = False
         self._grid_spacing = 50  # En píxeles de la imagen original
         self._grid_color = QColor(100, 100, 255, 150)
+        
+        # Estado de espejo
+        self._mirrored = False
         
         self.setMouseTracking(True)
 
@@ -372,4 +375,28 @@ class ZoomableImageLabel(QLabel):
     def set_grid_color(self, color):
         """Establece el color de la grilla."""
         self._grid_color = color
+        self.update()
+
+    def mirror_image(self, enabled):
+        """Espeja la imagen horizontalmente y transforma las guías."""
+        if not self._pixmap:
+            return
+        
+        # Solo aplicar si el estado cambia realmente
+        if enabled == self._mirrored:
+            return
+        
+        self._mirrored = enabled
+        
+        # Espejar el pixmap horizontalmente
+        transform = QTransform()
+        transform.scale(-1, 1)
+        self._pixmap = self._pixmap.transformed(transform)
+        
+        # Espejar las guías verticales (coordenadas normalizadas)
+        self._vertical_guides = [1.0 - g for g in self._vertical_guides]
+        
+        # Las guías horizontales no cambian al espejar horizontalmente
+        # La grilla es simétrica, no requiere ajustes
+        
         self.update()
